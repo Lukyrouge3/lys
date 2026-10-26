@@ -14,9 +14,20 @@ datasource db {
 }
 
 model Secret {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  value     String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  providers Provider[]
+}
+
+model Provider {
   id        String   @id @default(uuid())
   name      String   @unique
-  value     String
+  host      String
+  apiKey    Secret   @relation(fields: [apiKeyId], references: [id])
+  apiKeyId  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

@@ -4,9 +4,11 @@
 		"prisma": "deno run -A --env-file npm:prisma",
 		"db:generate": "deno task prisma generate",
 		"db:migrate": "deno task prisma migrate dev",
-		"db:studio": "deno task prisma studio"
+		"db:studio": "deno task prisma studio",
+		"db:seed": "deno run -A --env-file prisma/seed.ts"
 	},
 	"imports": {
+		"@openai/openai": "jsr:@openai/openai@^7.2.0",
 		"@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7.10.1",
 		"@prisma/client": "npm:@prisma/client@^7.10.1",
 		"@std/assert": "jsr:@std/assert@1",
