@@ -30,4 +30,36 @@ model Provider {
   apiKeyId  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  llmCalls  LlmCall[]
+}
+
+enum LlmCallStatus {
+  Ok
+  Error
+}
+
+model LlmCall {
+  id             String        @id @default(uuid())
+  provider       Provider      @relation(fields: [providerId], references: [id])
+  providerId     String
+  model          String
+  trigger        String
+  conversationId String?
+  parent         LlmCall?      @relation("LlmCallSteps", fields: [parentId], references: [id])
+  parentId       String?
+  steps          LlmCall[]     @relation("LlmCallSteps")
+  status         LlmCallStatus
+  finishReason   String?
+  inputTokens    Int?
+  outputTokens   Int?
+  cachedTokens   Int?
+  costUsd        Decimal?
+  latencyMs      Int
+  request        Json
+  response       Json?
+  error          String?
+  createdAt      DateTime      @default(now())
+
+  @@index([conversationId])
+  @@index([createdAt])
 }
