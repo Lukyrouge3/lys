@@ -9,7 +9,6 @@ import { AgentConfig } from "@/config/agentConfig.ts";
 const agentConfig: AgentConfig = {
   name: "test",
   model: "test-model",
-  provider: "test",
   systemPrompt: "You are a test.",
 };
 

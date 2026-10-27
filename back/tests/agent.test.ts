@@ -12,7 +12,6 @@ type Request = OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 const agentConfig: AgentConfig = {
   name: "test",
   model: "test-model",
-  provider: "test",
   systemPrompt: "You are a test.",
 };
 

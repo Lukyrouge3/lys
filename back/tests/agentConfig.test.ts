@@ -1,41 +1,42 @@
-import { assertEquals, assertThrows } from "@std/assert";
-import { loadAgentConfig } from "@/config/agentConfig.ts";
+import { assertEquals, assertRejects } from "@std/assert";
+import prisma from "@/db.ts";
+import { getAgent } from "@/config/agentConfig.ts";
 
-function withConfig(name: string, config: unknown, fn: () => void) {
-  const path = `./config/agents/${name}.json`;
-  Deno.writeTextFileSync(path, JSON.stringify(config));
-  try {
-    fn();
-  } finally {
-    Deno.removeSync(path);
-  }
-}
+Deno.test({
+  name: "getAgent",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn(t) {
+    await prisma.$executeRawUnsafe(
+      `TRUNCATE "Agent", "Provider", "Secret" CASCADE`,
+    );
+    const secret = await prisma.secret.create({
+      data: { name: "test-key", value: "unused" },
+    });
+    const provider = await prisma.provider.create({
+      data: { name: "test", host: "http://fake", apiKeyId: secret.id },
+    });
+    await prisma.agent.create({
+      data: {
+        name: "lys",
+        model: "test-model",
+        systemPrompt: "custom",
+        providerId: provider.id,
+      },
+    });
 
-Deno.test("missing system prompt falls back to the default", () => {
-  withConfig("__test_default", {
-    name: "test",
-    model: "m",
-    provider: "p",
-  }, () => {
-    const config = loadAgentConfig("__test_default");
-    assertEquals(config.name, "test");
-    assertEquals(config.systemPrompt.length > 0, true);
-  });
-});
+    await t.step("returns the agent with its provider and API key", async () => {
+      const agent = await getAgent("lys");
+      assertEquals(agent.model, "test-model");
+      assertEquals(agent.systemPrompt, "custom");
+      assertEquals(agent.provider.name, "test");
+      assertEquals(agent.provider.apiKey.name, "test-key");
+    });
 
-Deno.test("a custom system prompt is kept", () => {
-  withConfig("__test_custom", {
-    name: "test",
-    model: "m",
-    provider: "p",
-    systemPrompt: "custom",
-  }, () => {
-    assertEquals(loadAgentConfig("__test_custom").systemPrompt, "custom");
-  });
-});
+    await t.step("throws for an unknown agent", async () => {
+      await assertRejects(() => getAgent("nope"), Error, "Agent nope not found");
+    });
 
-Deno.test("an invalid config throws", () => {
-  withConfig("__test_invalid", { name: "x" }, () => {
-    assertThrows(() => loadAgentConfig("__test_invalid"));
-  });
+    await prisma.$disconnect();
+  },
 });

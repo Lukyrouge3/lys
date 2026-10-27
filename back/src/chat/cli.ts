@@ -1,6 +1,6 @@
-import { loadAgentConfig } from "@/config/agentConfig.ts";
+import { getAgent } from "@/config/agentConfig.ts";
 import { logger } from "@/utils/logger.ts";
-import { getOpenAIClient, getProvider } from "@/llm/provider.ts";
+import { getOpenAIClient } from "@/llm/provider.ts";
 import { createConversation, getLastConversation } from "@/llm/conversation.ts";
 import { createUserMessage, toModelMessage } from "@/llm/message.ts";
 import { generateToolRequest } from "@/tools/tool.ts";
@@ -12,10 +12,10 @@ export async function cliChat(
   agentName: string,
   options?: { messageCount?: number },
 ) {
-  const agentConfig = loadAgentConfig(agentName);
+  const agentConfig = await getAgent(agentName);
   logger.info(`Loaded agent config: ${agentConfig.name}`);
 
-  const provider = await getProvider(agentConfig.provider);
+  const provider = agentConfig.provider;
   logger.info(`Using provider: ${provider.name} (${provider.id})`);
 
   let conversation = await getLastConversation(options?.messageCount);

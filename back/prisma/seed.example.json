@@ -1,0 +1,8 @@
+{
+  "providers": [
+    { "name": "lamma", "host": "http://localhost:8080/v1", "apiKey": "your-api-key" }
+  ],
+  "agents": [
+    { "name": "lys", "model": "qwen3-4b", "provider": "lamma" }
+  ]
+}
