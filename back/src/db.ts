@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { MessageRole, PrismaClient } from "./generated/prisma/client.ts";
+import { MessageRole, PrismaClient } from "@/generated/prisma/client.ts";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: Deno.env.get("DATABASE_URL") }),

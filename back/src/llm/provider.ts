@@ -1,7 +1,7 @@
 import OpenAI from "@openai/openai";
-import prisma from "../db.ts";
-import { Provider, Secret } from "../generated/prisma/client.ts";
-import { decrypt } from "../utils/aes.ts";
+import prisma from "@/db.ts";
+import { Provider, Secret } from "@/generated/prisma/client.ts";
+import { decrypt } from "@/utils/aes.ts";
 
 export type ProviderWithApiKey = Provider & { apiKey: Secret };
 

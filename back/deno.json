@@ -15,6 +15,7 @@
     "@types/pg": "npm:@types/pg@^8.23.1",
     "pg": "npm:pg@^8.23.1",
     "prisma": "npm:prisma@^7.10.1",
-    "zod": "npm:zod@^4.6.7"
+    "zod": "npm:zod@^4.6.7",
+    "@/": "./src/"
   }
 }
