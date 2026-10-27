@@ -3,7 +3,6 @@ import { logger } from "@/utils/logger.ts";
 import { getOpenAIClient, getProvider } from "@/llm/provider.ts";
 import { createConversation, getLastConversation } from "@/llm/conversation.ts";
 import { createUserMessage, toModelMessage } from "@/llm/message.ts";
-import OpenAI from "@openai/openai";
 import { generateToolRequest } from "@/tools/tool.ts";
 import { runAgent } from "@/agent/agent.ts";
 
@@ -50,16 +49,17 @@ export async function cliChat(
     messages.push(...toModelMessage(msg));
 
     const encoder = new TextEncoder();
-    await runAgent(
+    await runAgent({
       openai,
       agentConfig,
       tools,
       messages,
-      conversation.id,
-      "test",
+      conversationId: conversation.id,
+      trigger: "test",
       provider,
-      (chunk: string) => Deno.stdout.writeSync(encoder.encode(chunk)),
-      () => Deno.stdout.writeSync(encoder.encode("[assistant] ")),
-    );
+      streamHandler: (chunk: string) =>
+        Deno.stdout.writeSync(encoder.encode(chunk)),
+      onTurnStart: () => Deno.stdout.writeSync(encoder.encode("[assistant] ")),
+    });
   }
 }

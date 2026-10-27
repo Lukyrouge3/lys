@@ -7,20 +7,38 @@ import { runTool } from "@/tools/tool.ts";
 import prisma from "@/db.ts";
 import { logger } from "@/utils/logger.ts";
 
-export async function runAgent(
-  openai: OpenAI,
-  agentConfig: AgentConfig,
-  tools: OpenAI.Chat.ChatCompletionTool[],
-  messages: OpenAI.Chat.ChatCompletionMessageParam[],
-  conversationId: string,
-  trigger: string,
-  provider: Provider,
-  streamHandler: (chunk: string) => void,
-  onTurnStart: () => void = () => {},
-) {
-  let iteration = 0;
-  while (iteration < 5) {
-    const request = generateStreamRequest(agentConfig, tools, messages);
+const MAX_TOOL_ROUNDS = 5;
+
+export type RunAgentOptions = {
+  openai: OpenAI;
+  agentConfig: AgentConfig;
+  tools: OpenAI.Chat.ChatCompletionTool[];
+  messages: OpenAI.Chat.ChatCompletionMessageParam[];
+  conversationId: string;
+  trigger: string;
+  provider: Provider;
+  streamHandler: (chunk: string) => void;
+  onTurnStart?: () => void;
+};
+
+export async function runAgent({
+  openai,
+  agentConfig,
+  tools,
+  messages,
+  conversationId,
+  trigger,
+  provider,
+  streamHandler,
+  onTurnStart = () => {},
+}: RunAgentOptions) {
+  for (let iteration = 0;; iteration++) {
+    // Once the cap is hit, call without tools to force a text answer
+    const request = generateStreamRequest(
+      agentConfig,
+      iteration < MAX_TOOL_ROUNDS ? tools : [],
+      messages,
+    );
 
     onTurnStart();
     const { content, llmCall, toolCalls } = await streamResponse(
@@ -52,14 +70,12 @@ export async function runAgent(
         }`;
       }
 
-      assistantMsg.toolCalls.find((call) => call.apiId === toolCall.id)!
-        .result = toolResponse;
+      const storedCall = assistantMsg.toolCalls.find((call) =>
+        call.apiId === toolCall.id
+      )!;
+      storedCall.result = toolResponse;
       await prisma.toolCall.update({
-        where: {
-          id: assistantMsg.toolCalls.find((call) =>
-            call.apiId === toolCall.id
-          )!.id,
-        },
+        where: { id: storedCall.id },
         data: { result: toolResponse },
       });
 
@@ -67,6 +83,5 @@ export async function runAgent(
     }
     messages.push(...toModelMessage(assistantMsg));
     if (toolCalls.length == 0) break;
-    iteration++;
   }
 }

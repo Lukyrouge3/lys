@@ -1,9 +1,9 @@
 import OpenAI from "@openai/openai";
 import { GetWeatherTool } from "@/tools/getWeather.ts";
 
-const tools = new Map<string, Tool>([
-  ["get_weather", new GetWeatherTool()],
-]);
+const tools = new Map<string, Tool>(
+  [new GetWeatherTool()].map((tool) => [tool.name, tool]),
+);
 
 export interface Tool {
   name: string;

@@ -25,7 +25,7 @@ export function generateStreamRequest(
     }, ...messages],
     stream: true as const,
     stream_options: { include_usage: true },
-    tools,
+    ...(tools.length > 0 ? { tools } : {}),
   };
 
   return request;
