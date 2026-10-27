@@ -5,7 +5,9 @@
     "db:generate": "deno task prisma generate",
     "db:migrate": "deno task prisma migrate dev",
     "db:studio": "deno task prisma studio",
-    "db:seed": "deno run -A --env-file prisma/seed.ts"
+    "db:seed": "deno run -A --env-file prisma/seed.ts",
+    "test:db": "deno run -A --env-file=.env.test npm:prisma migrate deploy",
+    "test": "deno test -A --env-file=.env.test tests/"
   },
   "imports": {
     "@openai/openai": "jsr:@openai/openai@^7.2.0",

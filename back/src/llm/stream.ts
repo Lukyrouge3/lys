@@ -33,6 +33,24 @@ export function generateStreamRequest(
 
 export type StreamResponse = OpenAI.Chat.Completions.ChatCompletionChunk;
 
+export type StreamedToolCall = { id: string; name: string; arguments: string };
+
+export function addToolCallDeltas(
+  toolCalls: StreamedToolCall[],
+  deltas: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta.ToolCall[] =
+    [],
+) {
+  for (const toolCall of deltas) {
+    toolCalls[toolCall.index] ??= { id: "", name: "", arguments: "" };
+    const call = toolCalls[toolCall.index];
+    if (toolCall.id) call.id = toolCall.id;
+    if (toolCall.function?.name) call.name = toolCall.function.name;
+    if (toolCall.function?.arguments) {
+      call.arguments += toolCall.function.arguments;
+    }
+  }
+}
+
 export async function streamResponse(
   openai: OpenAI,
   conversationId: string | null,
@@ -44,7 +62,7 @@ export async function streamResponse(
   {
     content: string;
     llmCall: LlmCall;
-    toolCalls: { id: string; name: string; arguments: string }[];
+    toolCalls: StreamedToolCall[];
   }
 > {
   const start = performance.now();
@@ -55,7 +73,7 @@ export async function streamResponse(
   try {
     const stream = await openai.chat.completions.create(request);
 
-    const toolCalls: { id: string; name: string; arguments: string }[] = [];
+    const toolCalls: StreamedToolCall[] = [];
     for await (const chunk of stream) {
       lastChunk = chunk;
       const choice = chunk.choices[0];
@@ -64,15 +82,7 @@ export async function streamResponse(
       content += contentDelta;
       streamHandler(contentDelta);
 
-      for (const toolCall of choice?.delta?.tool_calls ?? []) {
-        toolCalls[toolCall.index] ??= { id: "", name: "", arguments: "" };
-        const call = toolCalls[toolCall.index];
-        if (toolCall.id) call.id = toolCall.id;
-        if (toolCall.function?.name) call.name = toolCall.function.name;
-        if (toolCall.function?.arguments) {
-          call.arguments += toolCall.function.arguments;
-        }
-      }
+      addToolCallDeltas(toolCalls, choice?.delta?.tool_calls);
     }
     logger.debug(`Tool calls during LLM call: ${JSON.stringify(toolCalls)}`);
 
