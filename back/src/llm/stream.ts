@@ -1,16 +1,14 @@
 import OpenAI from "@openai/openai";
 import { AgentConfig } from "../config/agentConfig.ts";
 import prisma from "../db.ts";
-import { Prisma, Provider } from "../generated/prisma/client.ts";
-
-const encoder = new TextEncoder();
+import { MessageRole, Prisma, Provider } from "../generated/prisma/client.ts";
 
 export type StreamRequest =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 
 export function generateStreamRequest(
   agentConfig: AgentConfig,
-  messages: { role: "system" | "user" | "assistant"; content: string }[] = [],
+  messages: { role: MessageRole; content: string }[] = [],
 ): StreamRequest {
   const request = {
     model: agentConfig.model,
@@ -29,10 +27,12 @@ export type StreamResponse = OpenAI.Chat.Completions.ChatCompletionChunk;
 
 export async function streamResponse(
   openai: OpenAI,
+  conversationId: string | null,
+  trigger: string,
   request: StreamRequest,
   provider: Provider,
   streamHandler: (chunk: string) => void,
-): Promise<string> {
+): Promise<{ content: string; llmCallId: string }> {
   const start = performance.now();
   let content = "";
   let finishReason: string | null = null;
@@ -48,15 +48,15 @@ export async function streamResponse(
       content += delta;
       streamHandler(delta);
     }
-    console.log("\n");
+    console.log("");
 
     // With include_usage, the last chunk carries the token counts
     const usage = lastChunk?.usage;
-    await prisma.llmCall.create({
+    const llmCall = await prisma.llmCall.create({
       data: {
         providerId: provider.id,
         model: request.model,
-        trigger: "test",
+        trigger,
         status: "Ok",
         finishReason,
         inputTokens: usage?.prompt_tokens,
@@ -65,19 +65,21 @@ export async function streamResponse(
         latencyMs: Math.round(performance.now() - start),
         request: request as unknown as Prisma.InputJsonValue,
         response: { content, lastChunk: JSON.parse(JSON.stringify(lastChunk)) },
+        conversationId: conversationId,
       },
     });
-    return content;
+    return { content, llmCallId: llmCall.id };
   } catch (err) {
     await prisma.llmCall.create({
       data: {
         providerId: provider.id,
         model: request.model,
-        trigger: "test",
+        trigger,
         status: "Error",
         latencyMs: Math.round(performance.now() - start),
         request: request as unknown as Prisma.InputJsonValue,
         error: String(err),
+        conversationId: conversationId,
       },
     });
     throw err;

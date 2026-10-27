@@ -23,13 +23,13 @@ model Secret {
 }
 
 model Provider {
-  id        String   @id @default(uuid())
-  name      String   @unique
+  id        String    @id @default(uuid())
+  name      String    @unique
   host      String
-  apiKey    Secret   @relation(fields: [apiKeyId], references: [id])
+  apiKey    Secret    @relation(fields: [apiKeyId], references: [id])
   apiKeyId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   llmCalls  LlmCall[]
 }
 
@@ -44,7 +44,6 @@ model LlmCall {
   providerId     String
   model          String
   trigger        String
-  conversationId String?
   parent         LlmCall?      @relation("LlmCallSteps", fields: [parentId], references: [id])
   parentId       String?
   steps          LlmCall[]     @relation("LlmCallSteps")
@@ -59,7 +58,41 @@ model LlmCall {
   response       Json?
   error          String?
   createdAt      DateTime      @default(now())
+  messages       Message[]
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+  conversationId String?
 
   @@index([conversationId])
   @@index([createdAt])
+}
+
+model Conversation {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  llmCalls  LlmCall[]
+  messages  Message[]
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+  tool
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
+  role           MessageRole
+  content        String
+  createdAt      DateTime     @default(now())
+  toolCalls      Json? // assistant asked for tools
+  toolCallId     String? // tool result answers this call
+  llmCall        LlmCall?     @relation(fields: [llmCallId], references: [id])
+  llmCallId      String?
+
+  @@index([conversationId, createdAt])
 }
