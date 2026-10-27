@@ -1,12 +1,18 @@
 import prisma from "@/db.ts";
+import { Conversation, Message, ToolCall } from "@/generated/prisma/client.ts";
 
-export async function getLastConversation(messageCount = 10) {
+export async function getLastConversation(
+  messageCount = 10,
+): Promise<
+  Conversation & { messages: (Message & { toolCalls: ToolCall[] })[] }
+> {
   const conversation = await prisma.conversation.findFirst({
     orderBy: { createdAt: "desc" },
     include: {
       messages: {
         take: messageCount,
         orderBy: { createdAt: "desc" },
+        include: { toolCalls: true },
       },
     },
   });
@@ -17,10 +23,18 @@ export async function getLastConversation(messageCount = 10) {
   return conversation;
 }
 
-export async function createConversation(name: string) {
+export async function createConversation(
+  name: string,
+): Promise<
+  Conversation & { messages: (Message & { toolCalls: ToolCall[] })[] }
+> {
   const conversation = await prisma.conversation.create({
     data: { name },
-    include: { messages: true },
+    include: {
+      messages: {
+        include: { toolCalls: true },
+      },
+    },
   });
   return conversation;
 }

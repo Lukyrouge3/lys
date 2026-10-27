@@ -1,15 +1,21 @@
 import OpenAI from "@openai/openai";
 import { AgentConfig } from "@/config/agentConfig.ts";
 import prisma from "@/db.ts";
-import { Prisma, Provider } from "@/generated/prisma/client.ts";
-import { MessageRole } from "@/generated/prisma/enums.ts";
+import {
+  LlmCall,
+  Prisma,
+  Provider,
+  ToolCall,
+} from "@/generated/prisma/client.ts";
+import { logger } from "@/utils/logger.ts";
 
 export type StreamRequest =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 
 export function generateStreamRequest(
   agentConfig: AgentConfig,
-  messages: { role: MessageRole; content: string }[] = [],
+  tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [],
+  messages: OpenAI.Chat.ChatCompletionMessageParam[] = [],
 ): StreamRequest {
   const request = {
     model: agentConfig.model,
@@ -19,6 +25,7 @@ export function generateStreamRequest(
     }, ...messages],
     stream: true as const,
     stream_options: { include_usage: true },
+    tools,
   };
 
   return request;
@@ -33,7 +40,13 @@ export async function streamResponse(
   request: StreamRequest,
   provider: Provider,
   streamHandler: (chunk: string) => void,
-): Promise<{ content: string; llmCallId: string }> {
+): Promise<
+  {
+    content: string;
+    llmCall: LlmCall;
+    toolCalls: { id: string; name: string; arguments: string }[];
+  }
+> {
   const start = performance.now();
   let content = "";
   let finishReason: string | null = null;
@@ -41,15 +54,27 @@ export async function streamResponse(
 
   try {
     const stream = await openai.chat.completions.create(request);
+
+    const toolCalls: { id: string; name: string; arguments: string }[] = [];
     for await (const chunk of stream) {
       lastChunk = chunk;
       const choice = chunk.choices[0];
       if (choice?.finish_reason) finishReason = choice.finish_reason;
-      const delta = choice?.delta?.content ?? "";
-      content += delta;
-      streamHandler(delta);
+      const contentDelta = choice?.delta?.content ?? "";
+      content += contentDelta;
+      streamHandler(contentDelta);
+
+      for (const toolCall of choice?.delta?.tool_calls ?? []) {
+        toolCalls[toolCall.index] ??= { id: "", name: "", arguments: "" };
+        const call = toolCalls[toolCall.index];
+        if (toolCall.id) call.id = toolCall.id;
+        if (toolCall.function?.name) call.name = toolCall.function.name;
+        if (toolCall.function?.arguments) {
+          call.arguments += toolCall.function.arguments;
+        }
+      }
     }
-    console.log("");
+    logger.debug(`Tool calls during LLM call: ${JSON.stringify(toolCalls)}`);
 
     // With include_usage, the last chunk carries the token counts
     const usage = lastChunk?.usage;
@@ -69,7 +94,7 @@ export async function streamResponse(
         conversationId: conversationId,
       },
     });
-    return { content, llmCallId: llmCall.id };
+    return { content, llmCall, toolCalls };
   } catch (err) {
     await prisma.llmCall.create({
       data: {

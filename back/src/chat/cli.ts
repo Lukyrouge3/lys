@@ -1,9 +1,13 @@
 import { loadAgentConfig } from "@/config/agentConfig.ts";
 import { logger } from "@/utils/logger.ts";
 import { getOpenAIClient, getProvider } from "@/llm/provider.ts";
-import { generateStreamRequest, streamResponse } from "@/llm/stream.ts";
 import { createConversation, getLastConversation } from "@/llm/conversation.ts";
-import { createAssistantMessage, createUserMessage } from "@/llm/message.ts";
+import { createUserMessage, toModelMessage } from "@/llm/message.ts";
+import OpenAI from "@openai/openai";
+import { generateToolRequest } from "@/tools/tool.ts";
+import { runAgent } from "@/agent/agent.ts";
+
+const tools = generateToolRequest();
 
 export async function cliChat(
   agentName: string,
@@ -19,10 +23,13 @@ export async function cliChat(
   logger.info(`Using conversation: ${conversation.name} (${conversation.id})`);
   const openai = await getOpenAIClient(provider);
   const messages = conversation.messages.reverse().map((msg) =>
-    msg.modelMessage
-  );
+    toModelMessage(msg)
+  ).flat();
 
   for (const msg of conversation.messages) {
+    if (msg.role === "assistant" && msg.toolCalls.length > 0) {
+      continue;
+    }
     console.log(`[${msg.role}] ${msg.content}`);
   }
 
@@ -40,26 +47,19 @@ export async function cliChat(
     }
 
     const msg = await createUserMessage(input, conversation.id);
-    messages.push(msg.modelMessage);
-
-    const request = generateStreamRequest(agentConfig, messages);
+    messages.push(...toModelMessage(msg));
 
     const encoder = new TextEncoder();
-    Deno.stdout.writeSync(encoder.encode("[assistant] "));
-    const { content: answer, llmCallId } = await streamResponse(
+    await runAgent(
       openai,
+      agentConfig,
+      tools,
+      messages,
       conversation.id,
       "test",
-      request,
       provider,
       (chunk: string) => Deno.stdout.writeSync(encoder.encode(chunk)),
+      () => Deno.stdout.writeSync(encoder.encode("[assistant] ")),
     );
-
-    const assistantMsg = await createAssistantMessage(
-      answer,
-      conversation.id,
-      llmCallId,
-    );
-    messages.push(assistantMsg.modelMessage);
   }
 }

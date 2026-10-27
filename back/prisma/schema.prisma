@@ -79,7 +79,6 @@ enum MessageRole {
   user
   assistant
   system
-  tool
 }
 
 model Message {
@@ -89,10 +88,20 @@ model Message {
   role           MessageRole
   content        String
   createdAt      DateTime     @default(now())
-  toolCalls      Json? // assistant asked for tools
-  toolCallId     String? // tool result answers this call
   llmCall        LlmCall?     @relation(fields: [llmCallId], references: [id])
   llmCallId      String?
+  toolCalls      ToolCall[]
 
   @@index([conversationId, createdAt])
+}
+
+model ToolCall {
+  id        String   @id @default(uuid())
+  apiId     String
+  name      String
+  arguments String
+  result    String?
+  createdAt DateTime @default(now())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id])
 }
