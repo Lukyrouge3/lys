@@ -78,13 +78,21 @@ model LlmCall {
   @@index([createdAt])
 }
 
+enum Platform {
+  discord
+}
+
 model Conversation {
-  id        String    @id @default(uuid())
-  name      String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  llmCalls  LlmCall[]
-  messages  Message[]
+  id         String    @id @default(uuid())
+  name       String
+  platform   Platform?
+  externalId String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  llmCalls   LlmCall[]
+  messages   Message[]
+
+  @@unique([platform, externalId])
 }
 
 enum MessageRole {

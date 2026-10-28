@@ -1,12 +1,8 @@
-import {
-  Client,
-  Events,
-  GatewayIntentBits,
-  Message,
-  Partials,
-} from "discord.js";
+import { Client, Events, GatewayIntentBits, Message } from "discord.js";
 import { logger } from "@/utils/logger.ts";
-import { createChatSession } from "@/chat/session.ts";
+import { ChatSession, getChatSession } from "@/chat/session.ts";
+import { getAgent } from "@/config/agentConfig.ts";
+import { createConversation, getConversation } from "@/llm/conversation.ts";
 
 const DISCORD_MAX_LENGTH = 2000;
 // Discord shows "typing…" for about 10 seconds per call
@@ -30,21 +26,16 @@ export async function discordChat(
     throw new Error("DISCORD_TOKEN and DISCORD_OWNER_ID must be set");
   }
 
-  const session = await createChatSession(agentName, {
-    trigger: "discord",
-    conversationName: "Discord Conversation",
-    messageCount: options?.messageCount,
-  });
+  const agent = await getAgent(agentName);
 
-  async function handle(message: Message) {
+  const sessions = new Map<
+    string,
+    ChatSession
+  >();
+
+  async function handle(message: Message<true>) {
     const channel = message.channel;
     if (!channel.isSendable()) return;
-
-    if (message.content.trim().toLowerCase() === "/new") {
-      await session.newConversation();
-      await channel.send("Started a new conversation.");
-      return;
-    }
 
     await channel.sendTyping();
     const typing = setInterval(
@@ -52,9 +43,32 @@ export async function discordChat(
       TYPING_REFRESH_MS,
     );
 
-    let text = "";
     let sending = Promise.resolve();
+    let text = "";
+
     try {
+      let session = sessions.get(message.channel.id);
+      if (!session) {
+        let conversation = await getConversation(
+          "discord",
+          message.channel.id,
+          options?.messageCount,
+        );
+        if (!conversation) {
+          conversation = await createConversation(
+            message.channel.name || "Discord Conversation",
+            "discord",
+            message.channel.id,
+          );
+          logger.info(
+            `Created new conversation: ${conversation.name} (${conversation.id})`,
+          );
+        }
+
+        session = await getChatSession(agent, conversation, "discord");
+        sessions.set(message.channel.id, session);
+      }
+
       await session.send(message.content, {
         onChunk: (chunk) => {
           text += chunk;
@@ -80,11 +94,10 @@ export async function discordChat(
 
   const client = new Client({
     intents: [
-      GatewayIntentBits.DirectMessages,
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
     ],
-    // DM channels aren't cached until first use, so allow partial ones
-    partials: [Partials.Channel],
   });
 
   // Handle one message at a time so turns never interleave
@@ -93,7 +106,7 @@ export async function discordChat(
   client.on(Events.MessageCreate, (message) => {
     if (message.author.bot) return;
     if (message.author.id !== ownerId) return;
-    if (!message.channel.isDMBased()) return;
+    if (!message.inGuild() || !message.channel.isTextBased()) return;
 
     queue = queue.then(() => handle(message)).catch((err) => {
       logger.error(`Failed to handle Discord message: ${err}`);

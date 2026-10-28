@@ -1,13 +1,7 @@
 import OpenAI from "@openai/openai";
 import { AgentConfig } from "@/config/agentConfig.ts";
 import prisma from "@/db.ts";
-import {
-  LlmCall,
-  Prisma,
-  Provider,
-  ToolCall,
-} from "@/generated/prisma/client.ts";
-import { logger } from "@/utils/logger.ts";
+import { LlmCall, Prisma, Provider } from "@/generated/prisma/client.ts";
 
 export type StreamRequest =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;

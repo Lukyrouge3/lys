@@ -6,7 +6,6 @@ export async function cliChat(
 ) {
   const session = await createChatSession(agentName, {
     trigger: "cli",
-    conversationName: "Cli Conversation",
     messageCount: options?.messageCount,
   });
 
@@ -23,7 +22,7 @@ export async function cliChat(
     if (!input) break;
     if (input.toLocaleLowerCase() === "/new") {
       console.clear();
-      await session.newConversation();
+      // await session.newConversation(); TODO: repair lol
       continue;
     }
 

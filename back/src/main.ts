@@ -9,5 +9,5 @@ if (args.includes("--discord")) {
   await discordChat("lys");
 } else {
   logger.info("Starting CLI chat");
-  await cliChat("lys", { messageCount: 10 });
+  await cliChat("lys");
 }

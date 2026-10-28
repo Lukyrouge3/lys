@@ -7,14 +7,14 @@ export class GetWeatherTool implements Tool {
   argumentDescriptions = { city: "City name" };
   requiredArguments = ["city"];
 
-  async run(
+  run(
     _context: ToolContext,
     args: Record<string, unknown>,
   ): Promise<string> {
-    return JSON.stringify({
+    return Promise.resolve(JSON.stringify({
       city: args.city,
       temperature: "25°C",
       condition: "Sunny",
-    });
+    }));
   }
 }
