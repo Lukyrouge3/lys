@@ -60,6 +60,7 @@ export async function cliChat(
       streamHandler: (chunk: string) =>
         Deno.stdout.writeSync(encoder.encode(chunk)),
       onTurnStart: () => Deno.stdout.writeSync(encoder.encode("[assistant] ")),
+      onTurnEnd: () => Deno.stdout.writeSync(encoder.encode("\n")),
     });
   }
 }

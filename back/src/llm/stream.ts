@@ -84,7 +84,6 @@ export async function streamResponse(
 
       addToolCallDeltas(toolCalls, choice?.delta?.tool_calls);
     }
-    logger.debug(`Tool calls during LLM call: ${JSON.stringify(toolCalls)}`);
 
     // With include_usage, the last chunk carries the token counts
     const usage = lastChunk?.usage;

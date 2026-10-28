@@ -1,10 +1,16 @@
-import { cliChat } from "@/chat/cli.ts";
+import { discordChat } from "@/chat/discord.ts";
 import { logger } from "@/utils/logger.ts";
-import prisma from "@/db.ts";
 
-try {
-  logger.info("Starting chat session");
-  await cliChat("lys");
-} finally {
-  await prisma.$disconnect();
-}
+logger.info("Starting Discord bot");
+await discordChat("lys");
+
+/*import { createClient, FileStat } from "webdav";
+
+const user = Deno.env.get("NEXTCLOUD_USERNAME")!;
+const password = Deno.env.get("NEXTCLOUD_PASSWORD")!;
+const url = Deno.env.get("NEXTCLOUD_URL")!;
+const client = createClient(
+  `${url}/remote.php/dav/files/${user}`,
+  { username: user, password },
+);
+*/

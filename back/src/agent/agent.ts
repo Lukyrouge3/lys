@@ -19,6 +19,7 @@ export type RunAgentOptions = {
   provider: Provider;
   streamHandler: (chunk: string) => void;
   onTurnStart?: () => void;
+  onTurnEnd?: () => void;
 };
 
 export async function runAgent({
@@ -31,6 +32,7 @@ export async function runAgent({
   provider,
   streamHandler,
   onTurnStart = () => {},
+  onTurnEnd = () => {},
 }: RunAgentOptions) {
   for (let iteration = 0;; iteration++) {
     // Once the cap is hit, call without tools to force a text answer
@@ -49,6 +51,7 @@ export async function runAgent({
       provider,
       streamHandler,
     );
+    onTurnEnd();
 
     const assistantMsg = await createAssistantMessage(
       content,
