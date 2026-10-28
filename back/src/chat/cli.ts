@@ -1,64 +1,34 @@
-import { getAgent } from "@/config/agentConfig.ts";
-import { logger } from "@/utils/logger.ts";
-import { getOpenAIClient } from "@/llm/provider.ts";
-import { createConversation, getLastConversation } from "@/llm/conversation.ts";
-import { createUserMessage, toModelMessage } from "@/llm/message.ts";
-import { generateToolRequest } from "@/tools/tool.ts";
-import { runAgent } from "@/agent/agent.ts";
-
-const tools = generateToolRequest();
+import { createChatSession } from "@/chat/session.ts";
 
 export async function cliChat(
   agentName: string,
   options?: { messageCount?: number },
 ) {
-  const agentConfig = await getAgent(agentName);
-  logger.info(`Loaded agent config: ${agentConfig.name}`);
+  const session = await createChatSession(agentName, {
+    trigger: "cli",
+    conversationName: "Cli Conversation",
+    messageCount: options?.messageCount,
+  });
 
-  const provider = agentConfig.provider;
-  logger.info(`Using provider: ${provider.name} (${provider.id})`);
-
-  let conversation = await getLastConversation(options?.messageCount);
-  logger.info(`Using conversation: ${conversation.name} (${conversation.id})`);
-  const openai = await getOpenAIClient(provider);
-  const messages = conversation.messages.reverse().map((msg) =>
-    toModelMessage(msg)
-  ).flat();
-
-  for (const msg of conversation.messages) {
+  for (const msg of session.history) {
     if (msg.role === "assistant" && msg.toolCalls.length > 0) {
       continue;
     }
     console.log(`[${msg.role}] ${msg.content}`);
   }
 
+  const encoder = new TextEncoder();
   while (true) {
     const input = prompt("[user] ");
     if (!input) break;
     if (input.toLocaleLowerCase() === "/new") {
-      conversation = await createConversation("Test Conversation");
       console.clear();
-      logger.info(
-        `Created new conversation: ${conversation.name} (${conversation.id})`,
-      );
-      messages.length = 0;
+      await session.newConversation();
       continue;
     }
 
-    const msg = await createUserMessage(input, conversation.id);
-    messages.push(...toModelMessage(msg));
-
-    const encoder = new TextEncoder();
-    await runAgent({
-      openai,
-      agentConfig,
-      tools,
-      messages,
-      conversationId: conversation.id,
-      trigger: "test",
-      provider,
-      streamHandler: (chunk: string) =>
-        Deno.stdout.writeSync(encoder.encode(chunk)),
+    await session.send(input, {
+      onChunk: (chunk) => Deno.stdout.writeSync(encoder.encode(chunk)),
       onTurnStart: () => Deno.stdout.writeSync(encoder.encode("[assistant] ")),
       onTurnEnd: () => Deno.stdout.writeSync(encoder.encode("\n")),
     });

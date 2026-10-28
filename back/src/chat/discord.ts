@@ -5,15 +5,8 @@ import {
   Message,
   Partials,
 } from "discord.js";
-import { getAgent } from "@/config/agentConfig.ts";
 import { logger } from "@/utils/logger.ts";
-import { getOpenAIClient } from "@/llm/provider.ts";
-import { createConversation, getLastConversation } from "@/llm/conversation.ts";
-import { createUserMessage, toModelMessage } from "@/llm/message.ts";
-import { generateToolRequest } from "@/tools/tool.ts";
-import { runAgent } from "@/agent/agent.ts";
-
-const tools = generateToolRequest();
+import { createChatSession } from "@/chat/session.ts";
 
 const DISCORD_MAX_LENGTH = 2000;
 // Discord shows "typing…" for about 10 seconds per call
@@ -37,35 +30,21 @@ export async function discordChat(
     throw new Error("DISCORD_TOKEN and DISCORD_OWNER_ID must be set");
   }
 
-  const agentConfig = await getAgent(agentName);
-  logger.info(`Loaded agent config: ${agentConfig.name}`);
-
-  const provider = agentConfig.provider;
-  logger.info(`Using provider: ${provider.name} (${provider.id})`);
-
-  let conversation = await getLastConversation(options?.messageCount);
-  logger.info(`Using conversation: ${conversation.name} (${conversation.id})`);
-  const openai = await getOpenAIClient(provider);
-  const messages = conversation.messages.reverse().map((msg) =>
-    toModelMessage(msg)
-  ).flat();
+  const session = await createChatSession(agentName, {
+    trigger: "discord",
+    conversationName: "Discord Conversation",
+    messageCount: options?.messageCount,
+  });
 
   async function handle(message: Message) {
     const channel = message.channel;
     if (!channel.isSendable()) return;
 
     if (message.content.trim().toLowerCase() === "/new") {
-      conversation = await createConversation("Discord Conversation");
-      messages.length = 0;
-      logger.info(
-        `Created new conversation: ${conversation.name} (${conversation.id})`,
-      );
+      await session.newConversation();
       await channel.send("Started a new conversation.");
       return;
     }
-
-    const msg = await createUserMessage(message.content, conversation.id);
-    messages.push(...toModelMessage(msg));
 
     await channel.sendTyping();
     const typing = setInterval(
@@ -76,15 +55,8 @@ export async function discordChat(
     let text = "";
     let sending = Promise.resolve();
     try {
-      await runAgent({
-        openai,
-        agentConfig,
-        tools,
-        messages,
-        conversationId: conversation.id,
-        trigger: "discord",
-        provider,
-        streamHandler: (chunk) => {
+      await session.send(message.content, {
+        onChunk: (chunk) => {
           text += chunk;
         },
         onTurnStart: () => {
