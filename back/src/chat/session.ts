@@ -8,14 +8,13 @@ import {
 import { createUserMessage, toModelMessage } from "@/llm/message.ts";
 import { generateToolRequest } from "@/tools/tool.ts";
 import { runAgent } from "@/agent/agent.ts";
+import { EmitEvent } from "@/agent/events.ts";
 
 const tools = generateToolRequest();
 
 // What each chat app implements to display the agent's answer
 export type ChatAdapter = {
-  onChunk: (chunk: string) => void;
-  onTurnStart?: () => void;
-  onTurnEnd?: () => void;
+  onEvent: EmitEvent;
 };
 
 export type ChatSessionOptions = {
@@ -40,6 +39,7 @@ export async function createChatSession(
 }
 
 export type ChatSession = {
+  conversation: ConversationWithMessages;
   history: ConversationWithMessages["messages"];
   send: (input: string, adapter: ChatAdapter) => Promise<void>;
 };
@@ -55,6 +55,7 @@ export async function getChatSession(
   const openai = await getOpenAIClient(provider);
 
   return {
+    conversation,
     // Messages loaded on start, oldest first
     history,
     async send(input: string, adapter: ChatAdapter) {
@@ -69,9 +70,10 @@ export async function getChatSession(
         conversationId: conversation.id,
         trigger,
         provider,
-        streamHandler: adapter.onChunk,
-        onTurnStart: adapter.onTurnStart,
-        onTurnEnd: adapter.onTurnEnd,
+        emit: (event) => {
+          if (event.type === "titleChanged") conversation.name = event.title;
+          adapter.onEvent(event);
+        },
       });
     },
   };

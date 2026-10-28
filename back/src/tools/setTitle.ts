@@ -23,6 +23,7 @@ export class SetTitleTool implements Tool {
       where: { id: toolContext.conversationId },
       data: { name: parsed.data },
     });
+    toolContext.emit({ type: "titleChanged", title: parsed.data });
 
     return "OK";
   }

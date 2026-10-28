@@ -49,6 +49,9 @@ export async function discordChat(
     try {
       let session = sessions.get(message.channel.id);
       if (!session) {
+        logger.debug(
+          `Cache miss for channel ${message.channel.id}`,
+        );
         let conversation = await getConversation(
           "discord",
           message.channel.id,
@@ -70,20 +73,31 @@ export async function discordChat(
       }
 
       await session.send(message.content, {
-        onChunk: (chunk) => {
-          text += chunk;
-        },
-        onTurnStart: () => {
-          text = "";
-        },
-        onTurnEnd: () => {
-          const reply = text.trim();
-          if (!reply) return;
-          sending = sending.then(async () => {
-            for (const part of splitMessage(reply)) {
-              await channel.send(part);
+        onEvent: (event) => {
+          switch (event.type) {
+            case "chunk":
+              text += event.text;
+              break;
+            case "turnStart":
+              text = "";
+              break;
+            case "turnEnd": {
+              const reply = text.trim();
+              if (!reply) break;
+              sending = sending.then(async () => {
+                for (const part of splitMessage(reply)) {
+                  await channel.send(part);
+                }
+              });
+              break;
             }
-          });
+            case "titleChanged":
+              // Not awaited: renames are limited to 2 per 10 minutes per channel
+              channel.setName(event.title).catch((err) =>
+                logger.error(`Failed to rename channel: ${err}`)
+              );
+              break;
+          }
         },
       });
     } finally {

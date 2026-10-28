@@ -1,7 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { generateToolRequest, runTool } from "@/tools/tool.ts";
 
-const context = { conversationId: "test-conversation" };
+const context = { conversationId: "test-conversation", emit: () => {} };
 
 Deno.test("tool request has the OpenAI function schema", () => {
   const weather = generateToolRequest().find((tool) =>

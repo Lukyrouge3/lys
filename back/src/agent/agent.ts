@@ -6,6 +6,7 @@ import { createAssistantMessage, toModelMessage } from "@/llm/message.ts";
 import { runTool } from "@/tools/tool.ts";
 import prisma from "@/db.ts";
 import { logger } from "@/utils/logger.ts";
+import { EmitEvent } from "@/agent/events.ts";
 
 const MAX_TOOL_ROUNDS = 5;
 
@@ -17,9 +18,7 @@ export type RunAgentOptions = {
   conversationId: string;
   trigger: string;
   provider: Provider;
-  streamHandler: (chunk: string) => void;
-  onTurnStart?: () => void;
-  onTurnEnd?: () => void;
+  emit: EmitEvent;
 };
 
 export async function runAgent({
@@ -30,9 +29,7 @@ export async function runAgent({
   conversationId,
   trigger,
   provider,
-  streamHandler,
-  onTurnStart = () => {},
-  onTurnEnd = () => {},
+  emit,
 }: RunAgentOptions) {
   for (let iteration = 0;; iteration++) {
     // Once the cap is hit, call without tools to force a text answer
@@ -42,16 +39,18 @@ export async function runAgent({
       messages,
     );
 
-    onTurnStart();
+    emit({ type: "turnStart" });
     const { content, llmCall, toolCalls } = await streamResponse(
       openai,
       conversationId,
       trigger,
       request,
       provider,
-      streamHandler,
+      (text) => {
+        if (text) emit({ type: "chunk", text });
+      },
     );
-    onTurnEnd();
+    emit({ type: "turnEnd" });
 
     const assistantMsg = await createAssistantMessage(
       content,
@@ -65,7 +64,7 @@ export async function runAgent({
       try {
         toolResponse = await runTool(
           toolCall.name,
-          { conversationId },
+          { conversationId, emit },
           JSON.parse(toolCall.arguments),
         );
       } catch (error: unknown) {
@@ -83,6 +82,12 @@ export async function runAgent({
         data: { result: toolResponse },
       });
 
+      emit({
+        type: "toolCall",
+        name: toolCall.name,
+        arguments: toolCall.arguments,
+        result: toolResponse,
+      });
       logger.debug(`Tool call result for ${toolCall.name}: ${toolResponse}`);
     }
     messages.push(...toModelMessage(assistantMsg));

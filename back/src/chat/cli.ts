@@ -27,9 +27,19 @@ export async function cliChat(
     }
 
     await session.send(input, {
-      onChunk: (chunk) => Deno.stdout.writeSync(encoder.encode(chunk)),
-      onTurnStart: () => Deno.stdout.writeSync(encoder.encode("[assistant] ")),
-      onTurnEnd: () => Deno.stdout.writeSync(encoder.encode("\n")),
+      onEvent: (event) => {
+        switch (event.type) {
+          case "chunk":
+            Deno.stdout.writeSync(encoder.encode(event.text));
+            break;
+          case "turnStart":
+            Deno.stdout.writeSync(encoder.encode("[assistant] "));
+            break;
+          case "turnEnd":
+            Deno.stdout.writeSync(encoder.encode("\n"));
+            break;
+        }
+      },
     });
   }
 }

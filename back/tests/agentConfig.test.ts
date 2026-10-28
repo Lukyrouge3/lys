@@ -25,16 +25,23 @@ Deno.test({
       },
     });
 
-    await t.step("returns the agent with its provider and API key", async () => {
-      const agent = await getAgent("lys");
-      assertEquals(agent.model, "test-model");
-      assertEquals(agent.systemPrompt, "custom");
-      assertEquals(agent.provider.name, "test");
-      assertEquals(agent.provider.apiKey.name, "test-key");
-    });
+    await t.step(
+      "returns the agent with its provider and API key",
+      async () => {
+        const agent = await getAgent("lys");
+        assertEquals(agent.model, "test-model");
+        assertEquals(agent.systemPrompt, "custom");
+        assertEquals(agent.provider.name, "test");
+        assertEquals(agent.provider.apiKey.name, "test-key");
+      },
+    );
 
     await t.step("throws for an unknown agent", async () => {
-      await assertRejects(() => getAgent("nope"), Error, "Agent nope not found");
+      await assertRejects(
+        () => getAgent("nope"),
+        Error,
+        "Agent nope not found",
+      );
     });
 
     await prisma.$disconnect();

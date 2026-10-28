@@ -1,6 +1,7 @@
 import OpenAI from "@openai/openai";
 import { GetWeatherTool } from "@/tools/getWeather.ts";
 import { SetTitleTool } from "@/tools/setTitle.ts";
+import { EmitEvent } from "@/agent/events.ts";
 
 const tools = new Map<string, Tool>(
   [new GetWeatherTool(), new SetTitleTool()].map((tool) => [tool.name, tool]),
@@ -52,6 +53,7 @@ export function generateToolRequest(): OpenAI.Chat.ChatCompletionTool[] {
 
 export type ToolContext = {
   conversationId: string;
+  emit: EmitEvent;
 };
 
 export function runTool(

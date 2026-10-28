@@ -2,6 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import OpenAI from "@openai/openai";
 import prisma from "@/db.ts";
 import { runAgent } from "@/agent/agent.ts";
+import { AgentEvent, EmitEvent } from "@/agent/events.ts";
 import { generateToolRequest } from "@/tools/tool.ts";
 import { AgentConfig } from "@/config/agentConfig.ts";
 import { Provider } from "@/generated/prisma/client.ts";
@@ -35,8 +36,12 @@ function toolCallReply(id: string, name: string, args: string): Chunk[] {
     chunk({
       tool_calls: [{ index: 0, id, function: { name, arguments: "" } }],
     }),
-    chunk({ tool_calls: [{ index: 0, function: { arguments: args.slice(0, half) } }] }),
-    chunk({ tool_calls: [{ index: 0, function: { arguments: args.slice(half) } }] }),
+    chunk({
+      tool_calls: [{ index: 0, function: { arguments: args.slice(0, half) } }],
+    }),
+    chunk({
+      tool_calls: [{ index: 0, function: { arguments: args.slice(half) } }],
+    }),
   ];
 }
 
@@ -80,6 +85,7 @@ function run(
   provider: Provider,
   conversationId: string,
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  emit: EmitEvent = () => {},
 ) {
   return runAgent({
     openai,
@@ -89,7 +95,7 @@ function run(
     conversationId,
     trigger: "test",
     provider,
-    streamHandler: () => {},
+    emit,
   });
 }
 
@@ -109,43 +115,52 @@ Deno.test({
 
       assertEquals(requests.length, 1);
       assertEquals(messages.at(-1), { role: "assistant", content: "Hey!" });
-      const saved = await prisma.message.findMany({ where: { conversationId } });
+      const saved = await prisma.message.findMany({
+        where: { conversationId },
+      });
       assertEquals(saved.length, 1);
       assertEquals(saved[0].content, "Hey!");
       assert(saved[0].llmCallId);
     });
 
-    await t.step("a tool call runs the tool and sends the result back", async () => {
-      const { provider, conversationId } = await setup();
-      const { openai, requests } = fakeOpenAI((_, call) =>
-        call === 0
-          ? toolCallReply("call-1", "get_weather", '{"city":"Paris"}')
-          : textReply("It's sunny in Paris")
-      );
-      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-        { role: "user", content: "weather?" },
-      ];
+    await t.step(
+      "a tool call runs the tool and sends the result back",
+      async () => {
+        const { provider, conversationId } = await setup();
+        const { openai, requests } = fakeOpenAI((_, call) =>
+          call === 0
+            ? toolCallReply("call-1", "get_weather", '{"city":"Paris"}')
+            : textReply("It's sunny in Paris")
+        );
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+          { role: "user", content: "weather?" },
+        ];
 
-      await run(openai, provider, conversationId, messages);
+        await run(openai, provider, conversationId, messages);
 
-      assertEquals(requests.length, 2);
-      const second = requests[1].messages;
-      const assistant = second.at(-2) as OpenAI.Chat.ChatCompletionAssistantMessageParam;
-      assertEquals(assistant.tool_calls?.[0].id, "call-1");
-      const tool = second.at(-1) as OpenAI.Chat.ChatCompletionToolMessageParam;
-      assertEquals(tool.role, "tool");
-      assertEquals(tool.tool_call_id, "call-1");
-      assertStringIncludes(tool.content as string, "Paris");
+        assertEquals(requests.length, 2);
+        const second = requests[1].messages;
+        const assistant = second.at(
+          -2,
+        ) as OpenAI.Chat.ChatCompletionAssistantMessageParam;
+        assertEquals(assistant.tool_calls?.[0].id, "call-1");
+        const tool = second.at(
+          -1,
+        ) as OpenAI.Chat.ChatCompletionToolMessageParam;
+        assertEquals(tool.role, "tool");
+        assertEquals(tool.tool_call_id, "call-1");
+        assertStringIncludes(tool.content as string, "Paris");
 
-      const stored = await prisma.toolCall.findFirstOrThrow();
-      assertEquals(stored.apiId, "call-1");
-      assertEquals(stored.arguments, '{"city":"Paris"}');
-      assertStringIncludes(stored.result!, "Paris");
-      assertEquals(messages.at(-1), {
-        role: "assistant",
-        content: "It's sunny in Paris",
-      });
-    });
+        const stored = await prisma.toolCall.findFirstOrThrow();
+        assertEquals(stored.apiId, "call-1");
+        assertEquals(stored.arguments, '{"city":"Paris"}');
+        assertStringIncludes(stored.result!, "Paris");
+        assertEquals(messages.at(-1), {
+          role: "assistant",
+          content: "It's sunny in Paris",
+        });
+      },
+    );
 
     await t.step("an unknown tool stores the error as its result", async () => {
       const { provider, conversationId } = await setup();
@@ -161,21 +176,24 @@ Deno.test({
       assertEquals(stored.result, "Error: Tool nope not found");
     });
 
-    await t.step("malformed arguments store the error as the result", async () => {
-      const { provider, conversationId } = await setup();
-      const { openai } = fakeOpenAI((_, call) =>
-        call === 0
-          ? toolCallReply("call-1", "get_weather", "{not json")
-          : textReply("oops")
-      );
+    await t.step(
+      "malformed arguments store the error as the result",
+      async () => {
+        const { provider, conversationId } = await setup();
+        const { openai } = fakeOpenAI((_, call) =>
+          call === 0
+            ? toolCallReply("call-1", "get_weather", "{not json")
+            : textReply("oops")
+        );
 
-      await run(openai, provider, conversationId, [
-        { role: "user", content: "hi" },
-      ]);
+        await run(openai, provider, conversationId, [
+          { role: "user", content: "hi" },
+        ]);
 
-      const stored = await prisma.toolCall.findFirstOrThrow();
-      assertStringIncludes(stored.result!, "Error:");
-    });
+        const stored = await prisma.toolCall.findFirstOrThrow();
+        assertStringIncludes(stored.result!, "Error:");
+      },
+    );
 
     await t.step("after 5 tool rounds the last call has no tools", async () => {
       const { provider, conversationId } = await setup();
@@ -197,6 +215,43 @@ Deno.test({
         role: "assistant",
         content: "Giving up on tools",
       });
+    });
+
+    await t.step("events are emitted in order", async () => {
+      const { provider, conversationId } = await setup();
+      const { openai } = fakeOpenAI((_, call) =>
+        call === 0
+          ? toolCallReply("call-1", "set_title", '{"title":"Weather talk"}')
+          : textReply("Done")
+      );
+      const events: AgentEvent[] = [];
+
+      await run(
+        openai,
+        provider,
+        conversationId,
+        [{ role: "user", content: "rename this" }],
+        (event) => events.push(event),
+      );
+
+      assertEquals(events, [
+        { type: "turnStart" },
+        { type: "turnEnd" },
+        { type: "titleChanged", title: "Weather talk" },
+        {
+          type: "toolCall",
+          name: "set_title",
+          arguments: '{"title":"Weather talk"}',
+          result: "OK",
+        },
+        { type: "turnStart" },
+        { type: "chunk", text: "Done" },
+        { type: "turnEnd" },
+      ]);
+      const conversation = await prisma.conversation.findUniqueOrThrow({
+        where: { id: conversationId },
+      });
+      assertEquals(conversation.name, "Weather talk");
     });
 
     await prisma.$disconnect();
