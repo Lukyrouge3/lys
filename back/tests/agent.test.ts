@@ -217,6 +217,30 @@ Deno.test({
       });
     });
 
+    await t.step(
+      "only the first 5 tool calls of a response are kept",
+      async () => {
+        const { provider, conversationId } = await setup();
+        const manyCalls = Array.from({ length: 20 }, (_, i) =>
+          chunk({
+            tool_calls: [{
+              index: i,
+              id: `call-${i}`,
+              function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+            }],
+          }));
+        const { openai } = fakeOpenAI((_, call) =>
+          call === 0 ? manyCalls : textReply("Done")
+        );
+
+        await run(openai, provider, conversationId, [
+          { role: "user", content: "weather x20" },
+        ]);
+
+        assertEquals(await prisma.toolCall.count(), 5);
+      },
+    );
+
     await t.step("events are emitted in order", async () => {
       const { provider, conversationId } = await setup();
       const { openai } = fakeOpenAI((_, call) =>

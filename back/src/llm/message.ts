@@ -44,6 +44,17 @@ export async function createAssistantMessage(
   });
 }
 
+// Truncated calls (e.g. cut off by the context limit) have broken JSON,
+// which makes llama.cpp's template fail on every later request
+function validArguments(args: string): string {
+  try {
+    JSON.parse(args);
+    return args;
+  } catch {
+    return "{}";
+  }
+}
+
 export function toModelMessage(
   msg: Message & { toolCalls: ToolCall[] },
 ): OpenAI.Chat.ChatCompletionMessageParam[] {
@@ -64,7 +75,7 @@ export function toModelMessage(
       tool_calls: toolCalls.map((c) => ({
         id: c.apiId,
         type: "function" as const,
-        function: { name: c.name, arguments: c.arguments },
+        function: { name: c.name, arguments: validArguments(c.arguments) },
       })),
     },
     ...toolCalls.map((c) => ({

@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import OpenAI from "@openai/openai";
 import { toModelMessage } from "@/llm/message.ts";
 import { Message, ToolCall } from "@/generated/prisma/client.ts";
 
@@ -72,4 +73,14 @@ Deno.test("assistant tool calls become the call followed by one tool message eac
 Deno.test("a tool call without a result yields an empty tool message", () => {
   const result = toModelMessage(message({}, [{ apiId: "a" }]));
   assertEquals(result[1], { role: "tool", tool_call_id: "a", content: "" });
+});
+
+Deno.test("broken tool call arguments are sent as an empty object", () => {
+  const result = toModelMessage(message({}, [
+    { apiId: "a", arguments: '{"title": "Alien', result: "Error: bad JSON" },
+  ])) as OpenAI.Chat.ChatCompletionAssistantMessageParam[];
+
+  const call = result[0]
+    .tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall;
+  assertEquals(call.function.arguments, "{}");
 });

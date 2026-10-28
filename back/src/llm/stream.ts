@@ -2,6 +2,7 @@ import OpenAI from "@openai/openai";
 import { AgentConfig } from "@/config/agentConfig.ts";
 import prisma from "@/db.ts";
 import { LlmCall, Prisma, Provider } from "@/generated/prisma/client.ts";
+import { startDump } from "@/utils/debugDump.ts";
 
 export type StreamRequest =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
@@ -64,11 +65,14 @@ export async function streamResponse(
   let finishReason: string | null = null;
   let lastChunk: OpenAI.Chat.ChatCompletionChunk | null = null;
 
+  const dump = startDump(request);
+
   try {
     const stream = await openai.chat.completions.create(request);
 
     const toolCalls: StreamedToolCall[] = [];
     for await (const chunk of stream) {
+      dump(chunk);
       lastChunk = chunk;
       const choice = chunk.choices[0];
       if (choice?.finish_reason) finishReason = choice.finish_reason;
@@ -99,6 +103,7 @@ export async function streamResponse(
     });
     return { content, llmCall, toolCalls };
   } catch (err) {
+    dump({ error: String(err) });
     await prisma.llmCall.create({
       data: {
         providerId: provider.id,

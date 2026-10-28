@@ -9,6 +9,7 @@ import { logger } from "@/utils/logger.ts";
 import { EmitEvent } from "@/agent/events.ts";
 
 const MAX_TOOL_ROUNDS = 5;
+const MAX_TOOL_CALLS_PER_RESPONSE = 5;
 
 export type RunAgentOptions = {
   openai: OpenAI;
@@ -51,6 +52,17 @@ export async function runAgent({
       },
     );
     emit({ type: "turnEnd" });
+
+    // Extra calls are dropped before being stored, so a runaway response
+    // can't flood the history
+    if (toolCalls.length > MAX_TOOL_CALLS_PER_RESPONSE) {
+      logger.warn(
+        `Dropped ${
+          toolCalls.length - MAX_TOOL_CALLS_PER_RESPONSE
+        } of ${toolCalls.length} tool calls`,
+      );
+      toolCalls.length = MAX_TOOL_CALLS_PER_RESPONSE;
+    }
 
     const assistantMsg = await createAssistantMessage(
       content,
