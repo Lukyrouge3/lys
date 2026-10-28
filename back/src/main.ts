@@ -1,16 +1,13 @@
 import { discordChat } from "@/chat/discord.ts";
 import { logger } from "@/utils/logger.ts";
+import { cliChat } from "@/chat/cli.ts";
 
-logger.info("Starting Discord bot");
-await discordChat("lys");
+const args = Deno.args;
 
-/*import { createClient, FileStat } from "webdav";
-
-const user = Deno.env.get("NEXTCLOUD_USERNAME")!;
-const password = Deno.env.get("NEXTCLOUD_PASSWORD")!;
-const url = Deno.env.get("NEXTCLOUD_URL")!;
-const client = createClient(
-  `${url}/remote.php/dav/files/${user}`,
-  { username: user, password },
-);
-*/
+if (args.includes("--discord")) {
+  logger.info("Starting Discord bot");
+  await discordChat("lys");
+} else {
+  logger.info("Starting CLI chat");
+  await cliChat("lys", { messageCount: 10 });
+}

@@ -1,4 +1,4 @@
-import { Tool } from "@/tools/tool.ts";
+import { Tool, ToolContext } from "@/tools/tool.ts";
 
 export class GetWeatherTool implements Tool {
   name = "get_weather";
@@ -7,7 +7,10 @@ export class GetWeatherTool implements Tool {
   argumentDescriptions = { city: "City name" };
   requiredArguments = ["city"];
 
-  async run(args: Record<string, unknown>): Promise<string> {
+  async run(
+    _context: ToolContext,
+    args: Record<string, unknown>,
+  ): Promise<string> {
     return JSON.stringify({
       city: args.city,
       temperature: "25°C",

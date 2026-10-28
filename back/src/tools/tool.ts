@@ -1,8 +1,9 @@
 import OpenAI from "@openai/openai";
 import { GetWeatherTool } from "@/tools/getWeather.ts";
+import { SetTitleTool } from "@/tools/setTitle.ts";
 
 const tools = new Map<string, Tool>(
-  [new GetWeatherTool()].map((tool) => [tool.name, tool]),
+  [new GetWeatherTool(), new SetTitleTool()].map((tool) => [tool.name, tool]),
 );
 
 export interface Tool {
@@ -12,7 +13,10 @@ export interface Tool {
   argumentDescriptions: Record<string, string>;
   requiredArguments: string[];
 
-  run: (args: Record<string, unknown>) => Promise<string>;
+  run: (
+    toolContext: ToolContext,
+    args: Record<string, unknown>,
+  ) => Promise<string>;
 }
 
 export function generateToolRequest(): OpenAI.Chat.ChatCompletionTool[] {
@@ -46,13 +50,18 @@ export function generateToolRequest(): OpenAI.Chat.ChatCompletionTool[] {
   return toolRequests;
 }
 
+export type ToolContext = {
+  conversationId: string;
+};
+
 export function runTool(
   toolName: string,
+  toolContext: ToolContext,
   args: Record<string, unknown>,
 ): Promise<string> {
   const tool = tools.get(toolName);
   if (!tool) {
     throw new Error(`Tool ${toolName} not found`);
   }
-  return tool.run(args);
+  return tool.run(toolContext, args);
 }

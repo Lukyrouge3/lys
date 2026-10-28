@@ -65,6 +65,7 @@ export async function runAgent({
       try {
         toolResponse = await runTool(
           toolCall.name,
+          { conversationId },
           JSON.parse(toolCall.arguments),
         );
       } catch (error: unknown) {
