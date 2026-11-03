@@ -2,6 +2,7 @@ import { GuildTextBasedChannel } from "discord.js";
 import { logger } from "@/utils/logger.ts";
 import { ChatAdapter } from "@/chat/session.ts";
 import { AgentEvent } from "@/agent/events.ts";
+import { buildApprovalRequest } from "@/chat/discord/approval.ts";
 
 const DISCORD_MAX_LENGTH = 2000;
 // Discord shows "typing…" for about 10 seconds per call
@@ -47,6 +48,9 @@ export class DiscordReply implements ChatAdapter {
       case "titleChanged":
         this.rename(event.title);
         break;
+      case "approvalRequested":
+        this.sendApprovalRequest(event);
+        break;
     }
   }
 
@@ -70,5 +74,13 @@ export class DiscordReply implements ChatAdapter {
     this.channel.setName(title).catch((err) =>
       logger.error(`Failed to rename channel: ${err}`)
     );
+  }
+
+  private sendApprovalRequest(
+    event: Extract<AgentEvent, { type: "approvalRequested" }>,
+  ) {
+    this.sending = this.sending.then(async () => {
+      await this.channel.send(buildApprovalRequest(event));
+    });
   }
 }

@@ -9,6 +9,7 @@ import { createUserMessage, toModelMessage } from "@/llm/message.ts";
 import { generateToolRequest } from "@/tools/tool.ts";
 import { runAgent } from "@/agent/agent.ts";
 import { EmitEvent } from "@/agent/events.ts";
+import { resolveApproval } from "@/agent/approval.ts";
 
 const tools = generateToolRequest();
 
@@ -42,6 +43,12 @@ export type ChatSession = {
   conversation: ConversationWithMessages;
   history: ConversationWithMessages["messages"];
   send: (input: string, adapter: ChatAdapter) => Promise<void>;
+  // Returns false if there was nothing to resolve (already decided, unknown id)
+  resolveApproval: (
+    toolCallId: string,
+    approved: boolean,
+    adapter: ChatAdapter,
+  ) => Promise<boolean>;
 };
 
 export async function getChatSession(
@@ -54,6 +61,26 @@ export async function getChatSession(
   const messages = history.map((msg) => toModelMessage(msg)).flat();
   const openai = await getOpenAIClient(provider);
 
+  function emitTo(adapter: ChatAdapter): EmitEvent {
+    return (event) => {
+      if (event.type === "titleChanged") conversation.name = event.title;
+      adapter.onEvent(event);
+    };
+  }
+
+  async function run(emit: EmitEvent, runTrigger = trigger) {
+    await runAgent({
+      openai,
+      agentConfig: agent,
+      tools,
+      messages,
+      conversationId: conversation.id,
+      trigger: runTrigger,
+      provider,
+      emit,
+    });
+  }
+
   return {
     conversation,
     // Messages loaded on start, oldest first
@@ -61,20 +88,31 @@ export async function getChatSession(
     async send(input: string, adapter: ChatAdapter) {
       const msg = await createUserMessage(input, conversation.id);
       messages.push(...toModelMessage(msg));
+      await run(emitTo(adapter));
+    },
+    async resolveApproval(
+      toolCallId: string,
+      approved: boolean,
+      adapter: ChatAdapter,
+    ) {
+      const emit = emitTo(adapter);
+      const call = await resolveApproval(
+        toolCallId,
+        conversation.id,
+        approved,
+        emit,
+      );
+      if (!call) return false;
 
-      await runAgent({
-        openai,
-        agentConfig: agent,
-        tools,
-        messages,
-        conversationId: conversation.id,
-        trigger,
-        provider,
-        emit: (event) => {
-          if (event.type === "titleChanged") conversation.name = event.title;
-          adapter.onEvent(event);
-        },
-      });
+      // The cached history still has "waiting for approval" as the result
+      for (const msg of messages) {
+        if (msg.role === "tool" && msg.tool_call_id === call.apiId) {
+          msg.content = call.result ?? "";
+        }
+      }
+      // No new user message: the model just reacts to the outcome
+      await run(emit, "approval");
+      return true;
     },
   };
 }

@@ -16,6 +16,7 @@ export class FakeSendEmailTool implements Tool {
     _context: ToolContext,
     args: Record<string, unknown>,
   ): Promise<string> {
+    console.log("MY SUPER SECRET EMAIL TOOL: sending email", args);
     return Promise.resolve(`Email "${args.subject}" sent to ${args.to}`);
   }
 }

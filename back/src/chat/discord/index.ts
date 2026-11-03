@@ -3,6 +3,7 @@ import { logger } from "@/utils/logger.ts";
 import { getAgent } from "@/config/agentConfig.ts";
 import { getSession } from "@/chat/discord/session.ts";
 import { DiscordReply } from "@/chat/discord/reply.ts";
+import { handleInteraction } from "@/chat/discord/interaction.ts";
 
 export async function discordChat(
   agentName: string,
@@ -52,6 +53,30 @@ export async function discordChat(
         message.channel.send("Something went wrong, check the logs.").catch(
           () => {},
         );
+      }
+    });
+  });
+
+  client.on(Events.InteractionCreate, (interaction) => {
+    if (!interaction.isButton()) return;
+    if (interaction.user.id !== ownerId) return;
+    const channel = interaction.channel;
+    if (!interaction.inGuild() || !channel?.isTextBased()) return;
+    if (channel.isDMBased()) return;
+
+    // Same queue as messages: a click can start a run too
+    queue = queue.then(() =>
+      handleInteraction(interaction, channel, {
+        agent,
+        messageCount: options?.messageCount,
+      })
+    ).catch((err) => {
+      logger.error(`Failed to handle Discord interaction: ${err}`);
+      if (interaction.isRepliable()) {
+        interaction.reply({
+          content: "Something went wrong, check the logs.",
+          ephemeral: true,
+        }).catch(() => {});
       }
     });
   });

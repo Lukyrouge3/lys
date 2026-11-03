@@ -82,7 +82,8 @@ export async function runAgent({
         ? result.content
         : result.status === "error"
         ? `Error: ${result.content}`
-        : "Not run yet: waiting for the user's approval. Tell them what you want to do.";
+        : `Not run yet: the user now sees Approve / Reject buttons for this call. Tell \
+        them in one short sentence what it will do. Don't ask them to confirm in text, the buttons do that.`;
 
       const storedCall = assistantMsg.toolCalls.find((call) =>
         call.apiId === toolCall.id

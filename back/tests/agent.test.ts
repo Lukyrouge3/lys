@@ -2,6 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import OpenAI from "@openai/openai";
 import prisma from "@/db.ts";
 import { runAgent } from "@/agent/agent.ts";
+import { resolveApproval } from "@/agent/approval.ts";
 import { AgentEvent, EmitEvent } from "@/agent/events.ts";
 import { generateToolRequest } from "@/tools/tool.ts";
 import { AgentConfig } from "@/config/agentConfig.ts";
@@ -277,6 +278,102 @@ Deno.test({
       });
       assertEquals(conversation.name, "Weather talk");
     });
+
+    // Runs send_email (needs approval) once and returns its stored tool call
+    async function pendingCall() {
+      const { provider, conversationId } = await setup();
+      const { openai } = fakeOpenAI((_, call) =>
+        call === 0
+          ? toolCallReply(
+            "call-1",
+            "send_email",
+            '{"to":"a@b.c","subject":"hi"}',
+          )
+          : textReply("Needs your OK")
+      );
+      const events: AgentEvent[] = [];
+      await run(
+        openai,
+        provider,
+        conversationId,
+        [{ role: "user", content: "mail them" }],
+        (event) => events.push(event),
+      );
+      const call = await prisma.toolCall.findFirstOrThrow();
+      return { call, conversationId, events };
+    }
+
+    await t.step(
+      "a tool needing approval is stored as pending, not run",
+      async () => {
+        const { call, events } = await pendingCall();
+        assertEquals(call.approval, "pending");
+        assertStringIncludes(call.result!, "Not run yet");
+        assert(
+          events.some((e) =>
+            e.type === "approvalRequested" && e.approvalId === call.id
+          ),
+        );
+      },
+    );
+
+    await t.step("approving runs the tool and stores the result", async () => {
+      const { call, conversationId } = await pendingCall();
+      const resolved = await resolveApproval(
+        call.id,
+        conversationId,
+        true,
+        () => {},
+      );
+      assertEquals(resolved?.result, 'Email "hi" sent to a@b.c');
+      const stored = await prisma.toolCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+      assertEquals(stored.approval, "approved");
+      assert(stored.decidedAt);
+    });
+
+    await t.step("rejecting doesn't run the tool", async () => {
+      const { call, conversationId } = await pendingCall();
+      const resolved = await resolveApproval(
+        call.id,
+        conversationId,
+        false,
+        () => {},
+      );
+      assertStringIncludes(resolved!.result!, "Rejected");
+      const stored = await prisma.toolCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+      assertEquals(stored.approval, "denied");
+    });
+
+    await t.step("an approval can only be decided once", async () => {
+      const { call, conversationId } = await pendingCall();
+      assert(await resolveApproval(call.id, conversationId, true, () => {}));
+      assertEquals(
+        await resolveApproval(call.id, conversationId, true, () => {}),
+        null,
+      );
+      assertEquals(
+        await resolveApproval(call.id, conversationId, false, () => {}),
+        null,
+      );
+    });
+
+    await t.step(
+      "an approval from another conversation is ignored",
+      async () => {
+        const { call } = await pendingCall();
+        const other = await prisma.conversation.create({
+          data: { name: "other" },
+        });
+        assertEquals(
+          await resolveApproval(call.id, other.id, true, () => {}),
+          null,
+        );
+      },
+    );
 
     await prisma.$disconnect();
   },
