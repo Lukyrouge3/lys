@@ -11,6 +11,7 @@ export class SetTitleTool implements Tool {
       "New title for the conversation. Must be between 3 and 64 characters.",
   };
   requiredArguments = ["title"];
+  requireApproval = false;
 
   async run(
     toolContext: ToolContext,
@@ -38,6 +39,6 @@ export class SetTitleTool implements Tool {
     });
     toolContext.emit({ type: "titleChanged", title });
 
-    return "OK";
+    return "Title changed successfully";
   }
 }

@@ -1,6 +1,6 @@
 import OpenAI from "@openai/openai";
 import { AgentConfig } from "@/config/agentConfig.ts";
-import { Provider } from "@/generated/prisma/client.ts";
+import { ApprovalStatus, Provider } from "@/generated/prisma/client.ts";
 import { generateStreamRequest, streamResponse } from "@/llm/stream.ts";
 import { createAssistantMessage, toModelMessage } from "@/llm/message.ts";
 import { runTool } from "@/tools/tool.ts";
@@ -72,35 +72,48 @@ export async function runAgent({
     );
 
     for (const toolCall of toolCalls) {
-      let toolResponse = "";
-      try {
-        toolResponse = await runTool(
-          toolCall.name,
-          { conversationId, emit },
-          JSON.parse(toolCall.arguments),
-        );
-      } catch (error: unknown) {
-        toolResponse = `Error: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`;
-      }
+      const result = await runTool(
+        toolCall.name,
+        { conversationId, approval: ApprovalStatus.pending, emit },
+        toolCall.arguments,
+      );
+
+      const text = result.status === "ok"
+        ? result.content
+        : result.status === "error"
+        ? `Error: ${result.content}`
+        : "Not run yet: waiting for the user's approval. Tell them what you want to do.";
 
       const storedCall = assistantMsg.toolCalls.find((call) =>
         call.apiId === toolCall.id
       )!;
-      storedCall.result = toolResponse;
+      storedCall.result = text;
       await prisma.toolCall.update({
         where: { id: storedCall.id },
-        data: { result: toolResponse },
+        data: {
+          result: text,
+          approval: result.status === "pendingApproval"
+            ? ApprovalStatus.pending
+            : null,
+        },
       });
+
+      if (result.status === "pendingApproval") {
+        emit({
+          type: "approvalRequested",
+          approvalId: storedCall.id,
+          tool: toolCall.name,
+          summary: toolCall.arguments,
+        });
+      }
 
       emit({
         type: "toolCall",
         name: toolCall.name,
         arguments: toolCall.arguments,
-        result: toolResponse,
+        result: text,
       });
-      logger.debug(`Tool call result for ${toolCall.name}: ${toolResponse}`);
+      logger.debug(`Tool call result for ${toolCall.name}: ${text}`);
     }
     messages.push(...toModelMessage(assistantMsg));
     if (toolCalls.length == 0) break;

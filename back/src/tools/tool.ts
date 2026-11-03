@@ -1,10 +1,14 @@
 import OpenAI from "@openai/openai";
 import { GetWeatherTool } from "@/tools/getWeather.ts";
 import { SetTitleTool } from "@/tools/setTitle.ts";
+import { FakeSendEmailTool } from "@/tools/fakeSendEmail.ts";
 import { EmitEvent } from "@/agent/events.ts";
+import { ApprovalStatus } from "@/generated/prisma/enums.ts";
 
 const tools = new Map<string, Tool>(
-  [new GetWeatherTool(), new SetTitleTool()].map((tool) => [tool.name, tool]),
+  [new GetWeatherTool(), new SetTitleTool(), new FakeSendEmailTool()].map((
+    tool,
+  ) => [tool.name, tool]),
 );
 
 export interface Tool {
@@ -13,6 +17,7 @@ export interface Tool {
   arguments: Record<string, string>;
   argumentDescriptions: Record<string, string>;
   requiredArguments: string[];
+  requireApproval: boolean;
 
   run: (
     toolContext: ToolContext,
@@ -53,17 +58,41 @@ export function generateToolRequest(): OpenAI.Chat.ChatCompletionTool[] {
 
 export type ToolContext = {
   conversationId: string;
+  approval: ApprovalStatus;
+
   emit: EmitEvent;
 };
 
-export function runTool(
+export type ToolResult =
+  | { status: "ok"; content: string }
+  | { status: "error"; content: string }
+  | { status: "pendingApproval" };
+
+export async function runTool(
   toolName: string,
   toolContext: ToolContext,
-  args: Record<string, unknown>,
-): Promise<string> {
+  args: string,
+): Promise<ToolResult> {
   const tool = tools.get(toolName);
   if (!tool) {
-    throw new Error(`Tool ${toolName} not found`);
+    return { status: "error", content: `Tool ${toolName} not found` };
   }
-  return tool.run(toolContext, args);
+  try {
+    const parsedArgs = JSON.parse(args);
+    if (
+      tool.requireApproval && toolContext.approval !== ApprovalStatus.approved
+    ) {
+      return {
+        status: "pendingApproval",
+      };
+    }
+
+    return {
+      status: "ok",
+      content: await tool.run(toolContext, parsedArgs),
+    };
+  } catch (error) {
+    const content = error instanceof Error ? error.message : String(error);
+    return { status: "error" as const, content };
+  }
 }

@@ -266,7 +266,7 @@ Deno.test({
           type: "toolCall",
           name: "set_title",
           arguments: '{"title":"Weather talk"}',
-          result: "OK",
+          result: "Title changed successfully",
         },
         { type: "turnStart" },
         { type: "chunk", text: "Done" },

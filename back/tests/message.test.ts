@@ -25,6 +25,8 @@ function message(
       result: null,
       createdAt,
       messageId: "msg-1",
+      approval: null,
+      decidedAt: null,
       ...call,
     })),
   };

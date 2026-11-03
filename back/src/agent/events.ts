@@ -5,6 +5,12 @@ export type AgentEvent =
   | { type: "turnStart" }
   | { type: "turnEnd" }
   | { type: "toolCall"; name: string; arguments: string; result: string }
+  | {
+    type: "approvalRequested";
+    approvalId: string;
+    tool: string;
+    summary: string;
+  }
   | { type: "titleChanged"; title: string };
 
 export type EmitEvent = (event: AgentEvent) => void;

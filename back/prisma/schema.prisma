@@ -71,7 +71,7 @@ model LlmCall {
   error          String?
   createdAt      DateTime      @default(now())
   messages       Message[]
-  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String?
 
   @@index([conversationId])
@@ -103,7 +103,7 @@ enum MessageRole {
 
 model Message {
   id             String       @id @default(uuid())
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
   role           MessageRole
   content        String
@@ -116,12 +116,20 @@ model Message {
 }
 
 model ToolCall {
-  id        String   @id @default(uuid())
+  id        String          @id @default(uuid())
   apiId     String
   name      String
   arguments String
   result    String?
-  createdAt DateTime @default(now())
+  createdAt DateTime        @default(now())
   messageId String
-  message   Message  @relation(fields: [messageId], references: [id])
+  message   Message         @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  approval  ApprovalStatus?
+  decidedAt DateTime?
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  denied
 }
