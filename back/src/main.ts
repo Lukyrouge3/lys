@@ -1,4 +1,4 @@
-import { discordChat } from "@/chat/discord.ts";
+import { discordChat } from "@/chat/discord/index.ts";
 import { logger } from "@/utils/logger.ts";
 import { cliChat } from "@/chat/cli.ts";
 
