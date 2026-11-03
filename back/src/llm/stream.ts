@@ -3,21 +3,31 @@ import { AgentConfig } from "@/config/agentConfig.ts";
 import prisma from "@/db.ts";
 import { LlmCall, Prisma, Provider } from "@/generated/prisma/client.ts";
 import { startDump } from "@/utils/debugDump.ts";
+import { estimateTokens, trimHistory } from "@/llm/trim.ts";
 
 export type StreamRequest =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+
+// Must match llama.cpp's ctx-size. Later: per model, stored on the agent
+const CONTEXT_SIZE = 8192;
+const MAX_REPLY_TOKENS = 1024;
 
 export function generateStreamRequest(
   agentConfig: AgentConfig,
   tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [],
   messages: OpenAI.Chat.ChatCompletionMessageParam[] = [],
 ): StreamRequest {
+  const system = {
+    role: "system" as const,
+    content: agentConfig.systemPrompt,
+  };
+  const budget = CONTEXT_SIZE - MAX_REPLY_TOKENS - estimateTokens(system) -
+    estimateTokens(tools);
+
   const request = {
     model: agentConfig.model,
-    messages: [{
-      role: "system" as const,
-      content: agentConfig.systemPrompt,
-    }, ...messages],
+    messages: [system, ...trimHistory(messages, budget)],
+    max_tokens: MAX_REPLY_TOKENS,
     stream: true as const,
     stream_options: { include_usage: true },
     ...(tools.length > 0 ? { tools } : {}),
