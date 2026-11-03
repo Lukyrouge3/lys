@@ -2,7 +2,7 @@ import { Client, Events, GatewayIntentBits, Message } from "discord.js";
 import { logger } from "@/utils/logger.ts";
 import { getAgent } from "@/config/agentConfig.ts";
 import { getSession } from "@/chat/discord/session.ts";
-import { createReply } from "@/chat/discord/reply.ts";
+import { DiscordReply } from "@/chat/discord/reply.ts";
 
 export async function discordChat(
   agentName: string,
@@ -20,7 +20,8 @@ export async function discordChat(
     const channel = message.channel;
     if (!channel.isSendable()) return;
 
-    const reply = await createReply(channel);
+    const reply = new DiscordReply(channel);
+    await reply.start();
     try {
       const session = await getSession(channel, agent, options?.messageCount);
       await session.send(message.content, reply);

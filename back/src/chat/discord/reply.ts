@@ -1,6 +1,7 @@
 import { GuildTextBasedChannel } from "discord.js";
 import { logger } from "@/utils/logger.ts";
 import { ChatAdapter } from "@/chat/session.ts";
+import { AgentEvent } from "@/agent/events.ts";
 
 const DISCORD_MAX_LENGTH = 2000;
 // Discord shows "typing…" for about 10 seconds per call
@@ -15,49 +16,59 @@ function splitMessage(text: string): string[] {
 }
 
 // Shows "typing…" while the agent runs and sends its text at each turn end.
-// Call done() once the run is over to stop typing and wait for the sends.
-export async function createReply(
-  channel: GuildTextBasedChannel,
-): Promise<ChatAdapter & { done: () => Promise<void> }> {
-  await channel.sendTyping();
-  const typing = setInterval(
-    () => channel.sendTyping().catch(() => {}),
-    TYPING_REFRESH_MS,
-  );
+// Call start() before the run, and done() once it's over to stop typing and
+// wait for the sends.
+export class DiscordReply implements ChatAdapter {
+  private text = "";
+  private sending = Promise.resolve();
+  private typing?: ReturnType<typeof setInterval>;
 
-  let sending = Promise.resolve();
-  let text = "";
+  constructor(private channel: GuildTextBasedChannel) {}
 
-  return {
-    onEvent: (event) => {
-      switch (event.type) {
-        case "chunk":
-          text += event.text;
-          break;
-        case "turnStart":
-          text = "";
-          break;
-        case "turnEnd": {
-          const reply = text.trim();
-          if (!reply) break;
-          sending = sending.then(async () => {
-            for (const part of splitMessage(reply)) {
-              await channel.send(part);
-            }
-          });
-          break;
-        }
-        case "titleChanged":
-          // Not awaited: renames are limited to 2 per 10 minutes per channel
-          channel.setName(event.title).catch((err) =>
-            logger.error(`Failed to rename channel: ${err}`)
-          );
-          break;
+  async start() {
+    await this.channel.sendTyping();
+    this.typing = setInterval(
+      () => this.channel.sendTyping().catch(() => {}),
+      TYPING_REFRESH_MS,
+    );
+  }
+
+  onEvent(event: AgentEvent) {
+    switch (event.type) {
+      case "chunk":
+        this.text += event.text;
+        break;
+      case "turnStart":
+        this.text = "";
+        break;
+      case "turnEnd":
+        this.sendText();
+        break;
+      case "titleChanged":
+        this.rename(event.title);
+        break;
+    }
+  }
+
+  async done() {
+    clearInterval(this.typing);
+    await this.sending;
+  }
+
+  private sendText() {
+    const reply = this.text.trim();
+    if (!reply) return;
+    this.sending = this.sending.then(async () => {
+      for (const part of splitMessage(reply)) {
+        await this.channel.send(part);
       }
-    },
-    async done() {
-      clearInterval(typing);
-      await sending;
-    },
-  };
+    });
+  }
+
+  private rename(title: string) {
+    // Not awaited: renames are limited to 2 per 10 minutes per channel
+    this.channel.setName(title).catch((err) =>
+      logger.error(`Failed to rename channel: ${err}`)
+    );
+  }
 }
