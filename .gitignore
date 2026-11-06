@@ -1,2 +1,6 @@
 .env
 .env.test
+# CLIProxyAPI runtime data (OAuth tokens, logs)
+cliproxy/auths/
+cliproxy/logs/
+cliproxy/config.yaml
