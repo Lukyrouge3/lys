@@ -71,6 +71,7 @@ export async function runAgent({
       toolCalls,
     );
 
+    let paused = false;
     for (const toolCall of toolCalls) {
       const result = await runTool(
         toolCall.name,
@@ -82,8 +83,8 @@ export async function runAgent({
         ? result.content
         : result.status === "error"
         ? `Error: ${result.content}`
-        : `Not run yet: the user now sees Approve / Reject buttons for this call. Tell \
-        them in one short sentence what it will do. Don't ask them to confirm in text, the buttons do that.`;
+        : "Not run yet: waiting for the user to approve or reject it.";
+      if (result.status === "pendingApproval") paused = true;
 
       const storedCall = assistantMsg.toolCalls.find((call) =>
         call.apiId === toolCall.id
@@ -117,6 +118,6 @@ export async function runAgent({
       logger.debug(`Tool call result for ${toolCall.name}: ${text}`);
     }
     messages.push(...toModelMessage(assistantMsg));
-    if (toolCalls.length == 0) break;
+    if (toolCalls.length == 0 || paused) break;
   }
 }

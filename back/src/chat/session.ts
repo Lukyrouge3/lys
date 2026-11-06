@@ -9,7 +9,7 @@ import { createUserMessage, toModelMessage } from "@/llm/message.ts";
 import { generateToolRequest } from "@/tools/tool.ts";
 import { runAgent } from "@/agent/agent.ts";
 import { EmitEvent } from "@/agent/events.ts";
-import { resolveApproval } from "@/agent/approval.ts";
+import { canResume, resolveApproval } from "@/agent/approval.ts";
 
 const tools = generateToolRequest();
 
@@ -111,7 +111,7 @@ export async function getChatSession(
         }
       }
       // No new user message: the model just reacts to the outcome
-      await run(emit, "approval");
+      if (await canResume(call, messages)) await run(emit, "approval");
       return true;
     },
   };

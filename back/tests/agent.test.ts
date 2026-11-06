@@ -2,7 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import OpenAI from "@openai/openai";
 import prisma from "@/db.ts";
 import { runAgent } from "@/agent/agent.ts";
-import { resolveApproval } from "@/agent/approval.ts";
+import { canResume, resolveApproval } from "@/agent/approval.ts";
 import { AgentEvent, EmitEvent } from "@/agent/events.ts";
 import { generateToolRequest } from "@/tools/tool.ts";
 import { AgentConfig } from "@/config/agentConfig.ts";
@@ -282,25 +282,22 @@ Deno.test({
     // Runs send_email (needs approval) once and returns its stored tool call
     async function pendingCall() {
       const { provider, conversationId } = await setup();
-      const { openai } = fakeOpenAI((_, call) =>
-        call === 0
-          ? toolCallReply(
-            "call-1",
-            "send_email",
-            '{"to":"a@b.c","subject":"hi"}',
-          )
-          : textReply("Needs your OK")
+      const { openai, requests } = fakeOpenAI(() =>
+        toolCallReply("call-1", "send_email", '{"to":"a@b.c","subject":"hi"}')
       );
       const events: AgentEvent[] = [];
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: "user", content: "mail them" },
+      ];
       await run(
         openai,
         provider,
         conversationId,
-        [{ role: "user", content: "mail them" }],
+        messages,
         (event) => events.push(event),
       );
       const call = await prisma.toolCall.findFirstOrThrow();
-      return { call, conversationId, events };
+      return { call, conversationId, events, requests, messages };
     }
 
     await t.step(
@@ -314,6 +311,95 @@ Deno.test({
             e.type === "approvalRequested" && e.approvalId === call.id
           ),
         );
+      },
+    );
+
+    await t.step(
+      "a pending call ends the run on its tool result",
+      async () => {
+        const { requests, messages } = await pendingCall();
+        assertEquals(requests.length, 1);
+        assertEquals(messages.at(-1)?.role, "tool");
+      },
+    );
+
+    await t.step("resumes once the pending call is decided", async () => {
+      const { call, conversationId, messages } = await pendingCall();
+      assertEquals(await canResume(call, messages), false);
+      const resolved = await resolveApproval(
+        call.id,
+        conversationId,
+        true,
+        () => {},
+      );
+      assertEquals(await canResume(resolved!, messages), true);
+    });
+
+    await t.step(
+      "doesn't resume while another call from the same response is pending",
+      async () => {
+        const { provider, conversationId } = await setup();
+        const { openai } = fakeOpenAI(() => [
+          chunk({
+            tool_calls: [
+              {
+                index: 0,
+                id: "call-1",
+                function: {
+                  name: "send_email",
+                  arguments: '{"to":"a@b.c","subject":"one"}',
+                },
+              },
+              {
+                index: 1,
+                id: "call-2",
+                function: {
+                  name: "send_email",
+                  arguments: '{"to":"a@b.c","subject":"two"}',
+                },
+              },
+            ],
+          }),
+        ]);
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+          { role: "user", content: "mail them twice" },
+        ];
+        await run(openai, provider, conversationId, messages);
+        const [first, second] = await prisma.toolCall.findMany({
+          orderBy: { apiId: "asc" },
+        });
+        const one = await resolveApproval(
+          first.id,
+          conversationId,
+          true,
+          () => {},
+        );
+        assertEquals(await canResume(one!, messages), false);
+        const two = await resolveApproval(
+          second.id,
+          conversationId,
+          false,
+          () => {},
+        );
+        assertEquals(await canResume(two!, messages), true);
+      },
+    );
+
+    await t.step(
+      "doesn't resume if the conversation moved on",
+      async () => {
+        const { call, conversationId, messages } = await pendingCall();
+        messages.push(
+          { role: "user", content: "never mind" },
+          { role: "assistant", content: "ok" },
+        );
+        const resolved = await resolveApproval(
+          call.id,
+          conversationId,
+          true,
+          () => {},
+        );
+        assertEquals(await canResume(resolved!, messages), false);
       },
     );
 
