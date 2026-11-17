@@ -14,6 +14,7 @@ const FOLDER = "INBOX";
 const PREVIEW_CHARS = 800;
 
 export type MailEvent = {
+  accountId: string;
   account: string;
   folder: string;
   uid: number;
@@ -31,7 +32,7 @@ type Envelope = {
 };
 
 export function toMailEvent(
-  account: string,
+  account: { id: string; name: string },
   folder: string,
   msg: { uid: number; envelope?: Envelope | null },
   preview = "",
@@ -48,7 +49,8 @@ export function toMailEvent(
   const date = envelope?.date ? new Date(envelope.date) : null;
 
   return {
-    account,
+    accountId: account.id,
+    account: account.name,
     folder,
     uid: msg.uid,
     from: from || "(unknown sender)",
@@ -58,18 +60,46 @@ export function toMailEvent(
   };
 }
 
-/** Plain text of a message, whitespace collapsed and cut short. */
-export async function mailPreview(
+export type MailAttachment = {
+  filename: string;
+  mime: string;
+  content: Uint8Array;
+};
+
+export type MailHandler = (
+  mail: MailEvent,
+  attachments: MailAttachment[],
+) => void | Promise<void>;
+
+/** Body preview plus every real attachment, parsed once per message. */
+export async function parseMail(
   source?: Uint8Array | null,
   limit = PREVIEW_CHARS,
-): Promise<string> {
-  if (!source || source.length === 0) return "";
+): Promise<{ preview: string; attachments: MailAttachment[] }> {
+  if (!source || source.length === 0) {
+    return { preview: "", attachments: [] };
+  }
   try {
     const parsed = await PostalMime.parse(source);
-    return (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
+    const attachments = parsed.attachments
+      // Inline parts are signature logos and tracked pixels, not documents
+      .filter((part) => part.filename && !part.related && !part.contentId)
+      .map((part) => ({
+        filename: part.filename!,
+        mime: part.mimeType || "application/octet-stream",
+        content: typeof part.content === "string"
+          ? new TextEncoder().encode(part.content)
+          : new Uint8Array(part.content),
+      }))
+      .filter((part) => part.content.byteLength > 0);
+
+    return {
+      preview: (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, limit),
+      attachments,
+    };
   } catch {
     // A message that cannot be parsed still has a usable envelope
-    return "";
+    return { preview: "", attachments: [] };
   }
 }
 
@@ -97,7 +127,7 @@ export type WatchOptions = {
  * is not replayed.
  */
 export function watchMail(
-  onMail: (mail: MailEvent) => void | Promise<void>,
+  onMail: MailHandler,
   options: WatchOptions = {},
 ): Watcher {
   const controller = new AbortController();
@@ -125,7 +155,7 @@ export function watchMail(
 
 async function watchOnce(
   signal: AbortSignal,
-  onMail: (mail: MailEvent) => void | Promise<void>,
+  onMail: MailHandler,
   options: WatchOptions,
 ): Promise<void> {
   const account = await getMailAccount(options.account);
@@ -171,7 +201,7 @@ async function watchOnce(
 async function sweep(
   client: ImapFlow,
   account: MailAccountWithSecret,
-  onMail: (mail: MailEvent) => void | Promise<void>,
+  onMail: MailHandler,
 ): Promise<void> {
   const box = client.mailbox;
   if (!box) return;
@@ -197,8 +227,11 @@ async function sweep(
     ) {
       highest = Math.max(highest, msg.uid);
       try {
-        const preview = await mailPreview(msg.source);
-        await onMail(toMailEvent(account.name, FOLDER, msg, preview));
+        const { preview, attachments } = await parseMail(msg.source);
+        await onMail(
+          toMailEvent(account, FOLDER, msg, preview),
+          attachments,
+        );
       } catch (err) {
         // One bad message must not stop the folder
         logger.warn(`Handling mail ${msg.uid} failed: ${err}`);

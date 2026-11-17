@@ -3,6 +3,7 @@ import { formatMailNotice } from "@/chat/discord/notify.ts";
 import type { MailEvent } from "@/mail/watcher.ts";
 
 const mail: MailEvent = {
+  accountId: "acc-1",
   account: "lys",
   folder: "INBOX",
   uid: 1,

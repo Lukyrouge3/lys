@@ -3,10 +3,15 @@
 //   deno task mail:watch [accountName]
 import { watchMail } from "@/mail/watcher.ts";
 
-const watcher = watchMail((mail) => {
+const watcher = watchMail((mail, attachments) => {
   console.log(
     `[${mail.date?.toISOString() ?? "?"}] ${mail.account}/${mail.folder} ` +
-      `#${mail.uid} from ${mail.from}: ${mail.subject}`,
+      `#${mail.uid} from ${mail.from}: ${mail.subject}` +
+      (attachments.length
+        ? ` (${attachments.length} attachment${
+          attachments.length === 1 ? "" : "s"
+        })`
+        : ""),
   );
 }, { account: Deno.args[0] });
 

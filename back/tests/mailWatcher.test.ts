@@ -1,11 +1,12 @@
 import { assertEquals } from "@std/assert";
-import { mailPreview, toMailEvent, uidRange } from "@/mail/watcher.ts";
+import { parseMail, toMailEvent, uidRange } from "@/mail/watcher.ts";
 
+const account = { id: "acc-1", name: "lys" };
 const date = new Date("2026-11-17T09:00:00Z");
 
 Deno.test("an envelope with a name becomes a readable sender", () => {
   assertEquals(
-    toMailEvent("lys", "INBOX", {
+    toMailEvent(account, "INBOX", {
       uid: 7,
       envelope: {
         subject: "  Lunch?  ",
@@ -14,6 +15,7 @@ Deno.test("an envelope with a name becomes a readable sender", () => {
       },
     }),
     {
+      accountId: "acc-1",
       account: "lys",
       folder: "INBOX",
       uid: 7,
@@ -27,7 +29,7 @@ Deno.test("an envelope with a name becomes a readable sender", () => {
 
 Deno.test("an address without a name is shown as is", () => {
   assertEquals(
-    toMailEvent("lys", "INBOX", {
+    toMailEvent(account, "INBOX", {
       uid: 8,
       envelope: { from: [{ address: "bot@example.com" }] },
     }).from,
@@ -36,7 +38,7 @@ Deno.test("an address without a name is shown as is", () => {
 });
 
 Deno.test("a bare envelope gets fallbacks", () => {
-  const mail = toMailEvent("lys", "INBOX", { uid: 9, envelope: null });
+  const mail = toMailEvent(account, "INBOX", { uid: 9, envelope: null });
   assertEquals(mail.from, "(unknown sender)");
   assertEquals(mail.subject, "(no subject)");
   assertEquals(mail.date, null);
@@ -44,7 +46,7 @@ Deno.test("a bare envelope gets fallbacks", () => {
 
 Deno.test("a broken date becomes null", () => {
   assertEquals(
-    toMailEvent("lys", "INBOX", {
+    toMailEvent(account, "INBOX", {
       uid: 10,
       envelope: { date: "not a date" },
     }).date,
@@ -75,7 +77,7 @@ Deno.test("the preview is the plain text body, whitespace collapsed", async () =
   ].join("\r\n");
 
   assertEquals(
-    await mailPreview(encoder.encode(raw)),
+    (await parseMail(encoder.encode(raw))).preview,
     "Are you free at 13:00? Ana",
   );
 });
@@ -87,14 +89,57 @@ Deno.test("the preview is cut to the limit", async () => {
     "",
     "x".repeat(50),
   ].join("\r\n");
-  assertEquals((await mailPreview(encoder.encode(raw), 10)).length, 10);
+  assertEquals((await parseMail(encoder.encode(raw), 10)).preview.length, 10);
 });
 
-Deno.test("a message without source has no preview", async () => {
-  assertEquals(await mailPreview(undefined), "");
-  assertEquals(await mailPreview(new Uint8Array()), "");
+Deno.test("a message without source has no preview or attachments", async () => {
+  assertEquals(await parseMail(undefined), { preview: "", attachments: [] });
+  assertEquals(await parseMail(new Uint8Array()), {
+    preview: "",
+    attachments: [],
+  });
 });
 
 Deno.test("source without headers is treated as plain text", async () => {
-  assertEquals(await mailPreview(encoder.encode("not an email")), "not an email");
+  assertEquals(
+    (await parseMail(encoder.encode("not an email"))).preview,
+    "not an email",
+  );
+});
+
+const withAttachment = [
+  "From: Ana <ana@example.com>",
+  "Subject: Invoice",
+  'Content-Type: multipart/mixed; boundary="part"',
+  "",
+  "--part",
+  "Content-Type: text/plain",
+  "",
+  "Here is the invoice.",
+  "--part",
+  'Content-Type: application/pdf; name="invoice.pdf"',
+  'Content-Disposition: attachment; filename="invoice.pdf"',
+  "Content-Transfer-Encoding: base64",
+  "",
+  "JVBERi0xLjQK",
+  "--part",
+  'Content-Type: image/png; name="logo.png"',
+  'Content-Disposition: inline; filename="logo.png"',
+  "Content-ID: <logo>",
+  "Content-Transfer-Encoding: base64",
+  "",
+  "iVBORw0KGgo=",
+  "--part--",
+].join("\r\n");
+
+Deno.test("attachments are parsed and inline parts are skipped", async () => {
+  const { preview, attachments } = await parseMail(
+    encoder.encode(withAttachment),
+  );
+
+  assertEquals(preview, "Here is the invoice.");
+  assertEquals(attachments.length, 1);
+  assertEquals(attachments[0].filename, "invoice.pdf");
+  assertEquals(attachments[0].mime, "application/pdf");
+  assertEquals(attachments[0].content.byteLength > 0, true);
 });

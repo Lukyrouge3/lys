@@ -154,6 +154,7 @@ model MailAccount {
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
   folders    MailFolder[]
+  documents  MailDocument[]
 }
 
 // Tracks how far each folder has been read. UIDs are only comparable while
@@ -169,4 +170,27 @@ model MailFolder {
   updatedAt   DateTime    @updatedAt
 
   @@unique([accountId, path])
+}
+
+// One row per attachment saved to Nextcloud. The hash is the dedupe key, so
+// the same file arriving twice (or twice in one mail) is stored once.
+model MailDocument {
+  id         String      @id @default(uuid())
+  account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId  String
+  folder     String
+  uid        Int
+  from       String
+  subject    String
+  receivedAt DateTime
+  filename   String
+  mime       String
+  bytes      Int
+  sha256     String      @unique
+  path       String
+  category   String
+  createdAt  DateTime    @default(now())
+
+  @@index([receivedAt])
+  @@index([accountId, folder, uid])
 }

@@ -1,13 +1,17 @@
 import { assertEquals } from "@std/assert";
 import OpenAI from "@openai/openai";
 import {
+  classifyDocumentWith,
   classifyPrompt,
   classifyWith,
+  documentPrompt,
+  parseCategory,
   parseImportance,
 } from "@/mail/classify.ts";
 import type { MailEvent } from "@/mail/watcher.ts";
 
 const mail: MailEvent = {
+  accountId: "acc-1",
   account: "lys",
   folder: "INBOX",
   uid: 3,
@@ -85,5 +89,54 @@ Deno.test("a missing answer falls back to normal", async () => {
   assertEquals(
     (await classifyWith(openai, "test-model", mail)).importance,
     "normal",
+  );
+});
+
+const document = {
+  filename: "invoice-0042.pdf",
+  mime: "application/pdf",
+  from: "Ana <ana@example.com>",
+  subject: "Your bill",
+  preview: "Payment due by Friday.",
+};
+
+Deno.test("document categories are matched word by word", () => {
+  assertEquals(parseCategory("invoice"), "invoice");
+  assertEquals(parseCategory("TRAVEL"), "travel");
+  assertEquals(parseCategory("This is a medical report."), "medical");
+});
+
+Deno.test("plurals are understood", () => {
+  assertEquals(parseCategory("invoices"), "invoice");
+  assertEquals(parseCategory("taxes"), "tax");
+});
+
+Deno.test("an unknown category becomes other", () => {
+  assertEquals(parseCategory(""), "other");
+  assertEquals(parseCategory("souvenir"), "other");
+  assertEquals(parseCategory("42"), "other");
+});
+
+Deno.test("the document prompt carries name, type and context", () => {
+  const prompt = documentPrompt(document);
+  assertEquals(prompt.includes("File: invoice-0042.pdf"), true);
+  assertEquals(prompt.includes("Type: application/pdf"), true);
+  assertEquals(prompt.includes("Subject: Your bill"), true);
+  assertEquals(prompt.endsWith("Payment due by Friday."), true);
+});
+
+Deno.test("the model's answer picks the document category", async () => {
+  const { openai } = fakeOpenAI("invoice");
+  assertEquals(
+    await classifyDocumentWith(openai, "test-model", document),
+    "invoice",
+  );
+});
+
+Deno.test("a document answer without a category becomes other", async () => {
+  const { openai } = fakeOpenAI(null);
+  assertEquals(
+    await classifyDocumentWith(openai, "test-model", document),
+    "other",
   );
 });
