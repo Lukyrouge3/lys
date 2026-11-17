@@ -4,5 +4,17 @@
   ],
   "agents": [
     { "name": "lys", "model": "qwen3-4b", "provider": "lamma" }
+  ],
+  "mailAccounts": [
+    {
+      "name": "lys",
+      "address": "lys@deneria.net",
+      "imapHost": "mail.deneria.net",
+      "imapPort": 993,
+      "smtpHost": "mail.deneria.net",
+      "smtpPort": 587,
+      "username": "lys@deneria.net",
+      "password": "your-mailbox-password"
+    }
   ]
 }

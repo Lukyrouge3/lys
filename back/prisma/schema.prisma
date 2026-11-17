@@ -14,12 +14,13 @@ datasource db {
 }
 
 model Secret {
-  id        String     @id @default(uuid())
-  name      String     @unique
-  value     String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  providers Provider[]
+  id           String        @id @default(uuid())
+  name         String        @unique
+  value        String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  providers    Provider[]
+  mailAccounts MailAccount[]
 }
 
 model Provider {
@@ -135,4 +136,37 @@ enum ApprovalStatus {
   pending
   approved
   denied
+}
+
+model MailAccount {
+  id         String       @id @default(uuid())
+  name       String       @unique
+  // The address the agent shows and replies from
+  address    String       @unique
+  imapHost   String
+  imapPort   Int          @default(993)
+  smtpHost   String
+  smtpPort   Int          @default(587)
+  username   String
+  password   Secret       @relation(fields: [passwordId], references: [id])
+  passwordId String
+  enabled    Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  folders    MailFolder[]
+}
+
+// Tracks how far each folder has been read. UIDs are only comparable while
+// uidValidity stays the same; Dovecot changes it when it rewrites a mailbox.
+model MailFolder {
+  id          String      @id @default(uuid())
+  account     MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId   String
+  path        String
+  uidValidity BigInt?
+  lastUid     Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([accountId, path])
 }

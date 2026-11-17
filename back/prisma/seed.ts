@@ -14,6 +14,16 @@ const schema = z.object({
     model: z.string(),
     provider: z.string(),
   })),
+  mailAccounts: z.array(z.object({
+    name: z.string(),
+    address: z.string(),
+    imapHost: z.string(),
+    imapPort: z.number().default(993),
+    smtpHost: z.string(),
+    smtpPort: z.number().default(587),
+    username: z.string().optional(),
+    password: z.string(),
+  })).default([]),
 });
 
 const path = Deno.args[0] ?? "prisma/seed.json";
@@ -46,6 +56,32 @@ for (const { name, model, provider } of seed.agents) {
     },
   });
   console.log(`Agent "${name}" -> ${model} on ${provider}`);
+}
+
+for (const account of seed.mailAccounts) {
+  const secret = await prisma.secret.upsert({
+    where: { name: `${account.name}-mail-password` },
+    update: { value: await encrypt(account.password) },
+    create: {
+      name: `${account.name}-mail-password`,
+      value: await encrypt(account.password),
+    },
+  });
+  const data = {
+    address: account.address,
+    imapHost: account.imapHost,
+    imapPort: account.imapPort,
+    smtpHost: account.smtpHost,
+    smtpPort: account.smtpPort,
+    username: account.username ?? account.address,
+    passwordId: secret.id,
+  };
+  await prisma.mailAccount.upsert({
+    where: { name: account.name },
+    update: data,
+    create: { name: account.name, ...data },
+  });
+  console.log(`Mail account "${account.name}" -> ${account.address}`);
 }
 
 await prisma.$disconnect();
