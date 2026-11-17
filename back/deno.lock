@@ -11,6 +11,7 @@
     "npm:@smithy/hash-node@^4.3.5": "4.5.2",
     "npm:@smithy/signature-v4@^5.4.5": "5.7.4",
     "npm:@types/pg@^8.23.1": "8.23.1",
+    "npm:@vectorize-io/hindsight-client@^1.2.0": "1.2.0",
     "npm:discord.js@^14.27.0": "14.27.0",
     "npm:ical.js@^2.2.1": "2.2.1",
     "npm:pg@^8.23.1": "8.23.1",
@@ -643,6 +644,9 @@
       "dependencies": [
         "@types/node"
       ]
+    },
+    "@vectorize-io/hindsight-client@1.2.0": {
+      "integrity": "sha512-4KYsxLZhe9Hqyp6EQYMMHFmQKaP+7XBwclHD2cLjuHfR/b/KJgnieMK6YYIsWEifhRSR0llv45q5xXDObjILoQ=="
     },
     "@visx/curve@4.0.1-alpha.0": {
       "integrity": "sha512-jRu61Uz274pV1zyioXmboyrLutYbnKsgjj4njSGCnhdXj5GkZvZbg+ThDb6oOzoAnJOBRLz4rzPlWvNJOzuVMg==",
@@ -1460,6 +1464,7 @@
       "npm:@prisma/adapter-pg@^7.10.1",
       "npm:@prisma/client@^7.10.1",
       "npm:@types/pg@^8.23.1",
+      "npm:@vectorize-io/hindsight-client@^1.2.0",
       "npm:discord.js@^14.27.0",
       "npm:ical.js@^2.2.1",
       "npm:pg@^8.23.1",

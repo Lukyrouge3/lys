@@ -2,11 +2,19 @@ import OpenAI from "@openai/openai";
 import { GetWeatherTool } from "@/tools/getWeather.ts";
 import { SetTitleTool } from "@/tools/setTitle.ts";
 import { FakeSendEmailTool } from "@/tools/fakeSendEmail.ts";
+import { RecallMemoryTool } from "@/tools/recallMemory.ts";
+import { SaveMemoryTool } from "@/tools/saveMemory.ts";
 import { EmitEvent } from "@/agent/events.ts";
 import { ApprovalStatus } from "@/generated/prisma/enums.ts";
 
 const tools = new Map<string, Tool>(
-  [new GetWeatherTool(), new SetTitleTool(), new FakeSendEmailTool()].map((
+  [
+    new GetWeatherTool(),
+    new SetTitleTool(),
+    new FakeSendEmailTool(),
+    new RecallMemoryTool(),
+    new SaveMemoryTool(),
+  ].map((
     tool,
   ) => [tool.name, tool]),
 );

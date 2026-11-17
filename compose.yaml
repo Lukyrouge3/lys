@@ -27,5 +27,18 @@ services:
       - ./cliproxy/auths:/root/.cli-proxy-api
       - ./cliproxy/logs:/CLIProxyAPI/logs
 
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:latest
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+      - "9999:9999"
+    environment:
+      HINDSIGHT_API_LLM_PROVIDER: "openrouter"
+      HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_API_LLM_API_KEY}
+    volumes:
+      - hindsight-data:/home/hindsight/.pg0
+
 volumes:
   postgres-data:
+  hindsight-data:

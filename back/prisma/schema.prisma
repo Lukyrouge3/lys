@@ -108,6 +108,9 @@ model Message {
   role           MessageRole
   content        String
   createdAt      DateTime     @default(now())
+  // Set once the message has been appended to the conversation's Hindsight
+  // document, so each turn only sends what is new
+  retainedAt     DateTime?
   llmCall        LlmCall?     @relation(fields: [llmCallId], references: [id])
   llmCallId      String?
   toolCalls      ToolCall[]

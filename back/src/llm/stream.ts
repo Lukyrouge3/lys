@@ -16,17 +16,21 @@ export function generateStreamRequest(
   agentConfig: AgentConfig,
   tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [],
   messages: OpenAI.Chat.ChatCompletionMessageParam[] = [],
+  memoryContext = "",
 ): StreamRequest {
-  const system = {
-    role: "system" as const,
-    content: agentConfig.systemPrompt,
-  };
+  const system: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: "system" as const, content: agentConfig.systemPrompt },
+  ];
+  if (memoryContext) {
+    system.push({ role: "system" as const, content: memoryContext });
+  }
+
   const budget = CONTEXT_SIZE - MAX_REPLY_TOKENS - estimateTokens(system) -
     estimateTokens(tools);
 
   const request = {
     model: agentConfig.model,
-    messages: [system, ...trimHistory(messages, budget)],
+    messages: [...system, ...trimHistory(messages, budget)],
     max_tokens: MAX_REPLY_TOKENS,
     stream: true as const,
     stream_options: { include_usage: true },

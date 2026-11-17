@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { generateToolRequest, runTool, ToolContext } from "@/tools/tool.ts";
 
 const context: ToolContext = {
@@ -61,6 +61,32 @@ Deno.test("an unknown tool returns an error result", async () => {
     status: "error",
     content: "Tool nope not found",
   });
+});
+
+Deno.test("memory tools are advertised to the model", () => {
+  const names = generateToolRequest().map((tool) =>
+    tool.type === "function" ? tool.function.name : ""
+  );
+  assert(names.includes("recall_memory"));
+  assert(names.includes("save_memory"));
+});
+
+Deno.test("memory tools reject empty arguments without calling out", async () => {
+  assertEquals((await runTool("recall_memory", context, "{}")).status, "error");
+  assertEquals((await runTool("save_memory", context, "{}")).status, "error");
+});
+
+Deno.test("save_memory rejects whitespace and oversized facts", async () => {
+  const blank = await runTool("save_memory", context, '{"content":"   "}');
+  assertEquals(blank.status, "error");
+
+  const huge = await runTool(
+    "save_memory",
+    context,
+    JSON.stringify({ content: "x".repeat(2001) }),
+  );
+  assertEquals(huge.status, "error");
+  assert(huge.status === "error" && huge.content.includes("2001"));
 });
 
 Deno.test("set_title returns an error result for an invalid title", async () => {

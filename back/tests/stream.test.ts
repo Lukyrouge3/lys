@@ -70,6 +70,34 @@ Deno.test("request starts with the system prompt", () => {
   assertEquals(request.stream, true);
 });
 
+Deno.test("remembered facts go in a second system message", () => {
+  const request = generateStreamRequest(
+    agentConfig,
+    [],
+    [{ role: "user", content: "hi" }],
+    "What you remember about them:\n- Hates mushrooms",
+  );
+  assertEquals(request.messages, [
+    { role: "system", content: "You are a test." },
+    {
+      role: "system",
+      content: "What you remember about them:\n- Hates mushrooms",
+    },
+    { role: "user", content: "hi" },
+  ]);
+});
+
+Deno.test("no memory context means no extra message", () => {
+  const request = generateStreamRequest(
+    agentConfig,
+    [],
+    [{ role: "user", content: "hi" }],
+    "",
+  );
+  assertEquals(request.messages.length, 2);
+  assertEquals(request.messages[0], { role: "system", content: "You are a test." });
+});
+
 Deno.test("request leaves out tools when there are none", () => {
   const request = generateStreamRequest(agentConfig, []);
   assertEquals("tools" in request, false);

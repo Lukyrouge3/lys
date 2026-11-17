@@ -15,6 +15,7 @@ function message(
     role: "assistant",
     content: "",
     createdAt,
+    retainedAt: null,
     llmCallId: null,
     ...fields,
     toolCalls: toolCalls.map((call, i) => ({

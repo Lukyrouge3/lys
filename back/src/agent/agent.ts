@@ -20,6 +20,8 @@ export type RunAgentOptions = {
   trigger: string;
   provider: Provider;
   emit: EmitEvent;
+  /** Remembered facts for this turn, injected as a second system message */
+  memoryContext?: string;
 };
 
 export async function runAgent({
@@ -31,6 +33,7 @@ export async function runAgent({
   trigger,
   provider,
   emit,
+  memoryContext = "",
 }: RunAgentOptions) {
   for (let iteration = 0;; iteration++) {
     // Once the cap is hit, call without tools to force a text answer
@@ -38,6 +41,7 @@ export async function runAgent({
       agentConfig,
       iteration < MAX_TOOL_ROUNDS ? tools : [],
       messages,
+      memoryContext,
     );
 
     emit({ type: "turnStart" });

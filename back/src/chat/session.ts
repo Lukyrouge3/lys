@@ -10,8 +10,27 @@ import { generateToolRequest } from "@/tools/tool.ts";
 import { runAgent } from "@/agent/agent.ts";
 import { EmitEvent } from "@/agent/events.ts";
 import { canResume, resolveApproval } from "@/agent/approval.ts";
+import {
+  buildRecallQuery,
+  formatMemories,
+  recallMemories,
+  retainConversation,
+} from "@/memory.ts";
+import type OpenAI from "@openai/openai";
 
 const tools = generateToolRequest();
+
+// The most recent user message, used to anchor vague recall queries
+function lastUserText(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role === "user" && typeof message.content === "string") {
+      return message.content;
+    }
+  }
+}
 
 // What each chat app implements to display the agent's answer
 export type ChatAdapter = {
@@ -68,7 +87,11 @@ export async function getChatSession(
     };
   }
 
-  async function run(emit: EmitEvent, runTrigger = trigger) {
+  async function run(
+    emit: EmitEvent,
+    runTrigger = trigger,
+    memoryContext = "",
+  ) {
     await runAgent({
       openai,
       agentConfig: agent,
@@ -78,6 +101,7 @@ export async function getChatSession(
       trigger: runTrigger,
       provider,
       emit,
+      memoryContext,
     });
   }
 
@@ -87,8 +111,19 @@ export async function getChatSession(
     history,
     async send(input: string, adapter: ChatAdapter) {
       const msg = await createUserMessage(input, conversation.id);
+
+      // Start of turn: pull in what is relevant from earlier conversations.
+      const memoryContext = formatMemories(
+        await recallMemories(buildRecallQuery(input, lastUserText(messages))),
+      );
+
       messages.push(...toModelMessage(msg));
-      await run(emitTo(adapter));
+      try {
+        await run(emitTo(adapter), trigger, memoryContext);
+      } finally {
+        // End of turn: index what was just said, without blocking the reply.
+        void retainConversation(conversation.id);
+      }
     },
     async resolveApproval(
       toolCallId: string,
@@ -111,7 +146,12 @@ export async function getChatSession(
         }
       }
       // No new user message: the model just reacts to the outcome
-      if (await canResume(call, messages)) await run(emit, "approval");
+      try {
+        if (await canResume(call, messages)) await run(emit, "approval");
+      } finally {
+        // The turn only really ends once the agent stops after the decision
+        void retainConversation(conversation.id);
+      }
       return true;
     },
   };
