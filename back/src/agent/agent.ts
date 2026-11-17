@@ -22,6 +22,8 @@ export type RunAgentOptions = {
   emit: EmitEvent;
   /** Remembered facts for this turn, injected as a second system message */
   memoryContext?: string;
+  /** Native attachment upload, when the chat supports one */
+  sendFile?: (file: { name: string; data: Uint8Array }) => Promise<void>;
 };
 
 export async function runAgent({
@@ -34,6 +36,7 @@ export async function runAgent({
   provider,
   emit,
   memoryContext = "",
+  sendFile,
 }: RunAgentOptions) {
   for (let iteration = 0;; iteration++) {
     // Once the cap is hit, call without tools to force a text answer
@@ -79,7 +82,12 @@ export async function runAgent({
     for (const toolCall of toolCalls) {
       const result = await runTool(
         toolCall.name,
-        { conversationId, approval: ApprovalStatus.pending, emit },
+        {
+          conversationId,
+          approval: ApprovalStatus.pending,
+          emit,
+          sendFile,
+        },
         toolCall.arguments,
       );
 

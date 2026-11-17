@@ -35,6 +35,9 @@ function lastUserText(
 // What each chat app implements to display the agent's answer
 export type ChatAdapter = {
   onEvent: EmitEvent;
+  // Upload a file as a native attachment. Absent when the chat has none,
+  // in which case tools fall back to a temporary link.
+  sendFile?: (file: { name: string; data: Uint8Array }) => Promise<void>;
 };
 
 export type ChatSessionOptions = {
@@ -79,6 +82,8 @@ export async function getChatSession(
   const history = conversation.messages.reverse();
   const messages = history.map((msg) => toModelMessage(msg)).flat();
   const openai = await getOpenAIClient(provider);
+  // Kept so an approval resume uses the same memories the turn started with
+  let turnMemory = "";
 
   function emitTo(adapter: ChatAdapter): EmitEvent {
     return (event) => {
@@ -91,6 +96,7 @@ export async function getChatSession(
     emit: EmitEvent,
     runTrigger = trigger,
     memoryContext = "",
+    sendFile?: (file: { name: string; data: Uint8Array }) => Promise<void>,
   ) {
     await runAgent({
       openai,
@@ -102,6 +108,7 @@ export async function getChatSession(
       provider,
       emit,
       memoryContext,
+      sendFile,
     });
   }
 
@@ -113,13 +120,18 @@ export async function getChatSession(
       const msg = await createUserMessage(input, conversation.id);
 
       // Start of turn: pull in what is relevant from earlier conversations.
-      const memoryContext = formatMemories(
+      turnMemory = formatMemories(
         await recallMemories(buildRecallQuery(input, lastUserText(messages))),
       );
 
       messages.push(...toModelMessage(msg));
       try {
-        await run(emitTo(adapter), trigger, memoryContext);
+        await run(
+          emitTo(adapter),
+          trigger,
+          turnMemory,
+          adapter.sendFile?.bind(adapter),
+        );
       } finally {
         // End of turn: index what was just said, without blocking the reply.
         void retainConversation(conversation.id);
@@ -136,6 +148,7 @@ export async function getChatSession(
         conversation.id,
         approved,
         emit,
+        adapter.sendFile?.bind(adapter),
       );
       if (!call) return false;
 
@@ -147,7 +160,14 @@ export async function getChatSession(
       }
       // No new user message: the model just reacts to the outcome
       try {
-        if (await canResume(call, messages)) await run(emit, "approval");
+        if (await canResume(call, messages)) {
+          await run(
+            emit,
+            "approval",
+            turnMemory,
+            adapter.sendFile?.bind(adapter),
+          );
+        }
       } finally {
         // The turn only really ends once the agent stops after the decision
         void retainConversation(conversation.id);

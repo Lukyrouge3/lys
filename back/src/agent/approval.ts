@@ -26,6 +26,7 @@ export async function resolveApproval(
   conversationId: string,
   approved: boolean,
   emit: EmitEvent,
+  sendFile?: (file: { name: string; data: Uint8Array }) => Promise<void>,
 ): Promise<ToolCall | null> {
   // Claiming it in one update is what makes a second click a no-op
   const claimed = await prisma.toolCall.updateMany({
@@ -49,7 +50,7 @@ export async function resolveApproval(
   if (approved) {
     const toolResult = await runTool(
       call.name,
-      { conversationId, approval: ApprovalStatus.approved, emit },
+      { conversationId, approval: ApprovalStatus.approved, emit, sendFile },
       call.arguments,
     );
     result = toolResult.status === "ok"

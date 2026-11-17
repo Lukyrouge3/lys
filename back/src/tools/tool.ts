@@ -4,6 +4,16 @@ import { SetTitleTool } from "@/tools/setTitle.ts";
 import { FakeSendEmailTool } from "@/tools/fakeSendEmail.ts";
 import { RecallMemoryTool } from "@/tools/recallMemory.ts";
 import { SaveMemoryTool } from "@/tools/saveMemory.ts";
+import { ShareFolderTool } from "@/tools/shareFolder.ts";
+import { CleanLinksTool } from "@/tools/cleanLinks.ts";
+import { SendFileTool } from "@/tools/sendFile.ts";
+import { ListFilesTool } from "@/tools/listFiles.ts";
+import { FindFilesTool } from "@/tools/findFiles.ts";
+import { ReadFileTool } from "@/tools/readFile.ts";
+import { WriteFileTool } from "@/tools/writeFile.ts";
+import { CreateFolderTool } from "@/tools/createFolder.ts";
+import { MoveFileTool } from "@/tools/moveFile.ts";
+import { DeleteFileTool } from "@/tools/deleteFile.ts";
 import { EmitEvent } from "@/agent/events.ts";
 import { ApprovalStatus } from "@/generated/prisma/enums.ts";
 
@@ -14,6 +24,16 @@ const tools = new Map<string, Tool>(
     new FakeSendEmailTool(),
     new RecallMemoryTool(),
     new SaveMemoryTool(),
+    new ShareFolderTool(),
+    new CleanLinksTool(),
+    new SendFileTool(),
+    new ListFilesTool(),
+    new FindFilesTool(),
+    new ReadFileTool(),
+    new WriteFileTool(),
+    new CreateFolderTool(),
+    new MoveFileTool(),
+    new DeleteFileTool(),
   ].map((
     tool,
   ) => [tool.name, tool]),
@@ -25,7 +45,10 @@ export interface Tool {
   arguments: Record<string, string>;
   argumentDescriptions: Record<string, string>;
   requiredArguments: string[];
-  requireApproval: boolean;
+  // Whether the call waits for the user's button. A function decides per call.
+  requireApproval:
+    | boolean
+    | ((args: Record<string, unknown>) => boolean);
 
   run: (
     toolContext: ToolContext,
@@ -69,6 +92,8 @@ export type ToolContext = {
   approval: ApprovalStatus;
 
   emit: EmitEvent;
+  /** Native attachment upload. Undefined when the chat has none. */
+  sendFile?: (file: { name: string; data: Uint8Array }) => Promise<void>;
 };
 
 export type ToolResult =
@@ -87,9 +112,10 @@ export async function runTool(
   }
   try {
     const parsedArgs = JSON.parse(args);
-    if (
-      tool.requireApproval && toolContext.approval !== ApprovalStatus.approved
-    ) {
+    const needsApproval = typeof tool.requireApproval === "function"
+      ? tool.requireApproval(parsedArgs)
+      : tool.requireApproval;
+    if (needsApproval && toolContext.approval !== ApprovalStatus.approved) {
       return {
         status: "pendingApproval",
       };

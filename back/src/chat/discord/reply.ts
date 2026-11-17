@@ -1,4 +1,5 @@
 import { GuildTextBasedChannel } from "discord.js";
+import { Buffer } from "node:buffer";
 import { logger } from "@/utils/logger.ts";
 import { ChatAdapter } from "@/chat/session.ts";
 import { AgentEvent } from "@/agent/events.ts";
@@ -57,6 +58,18 @@ export class DiscordReply implements ChatAdapter {
   async done() {
     clearInterval(this.typing);
     await this.sending;
+  }
+
+  // Uploads the file as a native attachment. Rejects on failure so the tool
+  // can fall back to a link; the send queue itself keeps going.
+  async sendFile(file: { name: string; data: Uint8Array }): Promise<void> {
+    const upload = this.sending.then(() =>
+      this.channel.send({
+        files: [{ attachment: Buffer.from(file.data), name: file.name }],
+      })
+    );
+    this.sending = upload.then(() => {}, () => {});
+    await upload;
   }
 
   private sendText() {
