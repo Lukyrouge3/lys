@@ -31,6 +31,8 @@ Deno.test({
         const agent = await getAgent("lys");
         assertEquals(agent.model, "test-model");
         assertEquals(agent.systemPrompt, "custom");
+        assertEquals(agent.contextWindow, 8192);
+        assertEquals(agent.maxReplyTokens, 1024);
         assertEquals(agent.provider.name, "test");
         assertEquals(agent.provider.apiKey.name, "test-key");
       },

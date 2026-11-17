@@ -94,6 +94,8 @@ export type ToolContext = {
   emit: EmitEvent;
   /** Native attachment upload. Undefined when the chat has none. */
   sendFile?: (file: { name: string; data: Uint8Array }) => Promise<void>;
+  /** Model context budget, so tools can size their output to fit */
+  contextWindow?: number;
 };
 
 export type ToolResult =

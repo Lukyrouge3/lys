@@ -120,8 +120,16 @@ export async function getChatSession(
       const msg = await createUserMessage(input, conversation.id);
 
       // Start of turn: pull in what is relevant from earlier conversations.
+      // Bigger models can afford more memories in the prompt.
+      const recallTokens = Math.min(
+        6000,
+        Math.max(1200, Math.floor(agent.contextWindow / 16)),
+      );
       turnMemory = formatMemories(
-        await recallMemories(buildRecallQuery(input, lastUserText(messages))),
+        await recallMemories(
+          buildRecallQuery(input, lastUserText(messages)),
+          recallTokens,
+        ),
       );
 
       messages.push(...toModelMessage(msg));

@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { normalizeFolder, normalizePath } from "@/files/paths.ts";
+import { readLimit } from "@/tools/readFile.ts";
 import {
   entryPath,
   formatDate,
@@ -91,4 +92,11 @@ Deno.test("find results show the full path", () => {
 
 Deno.test("entry paths drop the leading slash", () => {
   assertEquals(entryPath(file), "Mail/2026/x.pdf");
+});
+
+Deno.test("read size scales with the context window", () => {
+  assertEquals(readLimit(undefined), 8000);
+  assertEquals(readLimit(8192), 8000);
+  assertEquals(readLimit(65536), 39321);
+  assertEquals(readLimit(200000), 120000);
 });

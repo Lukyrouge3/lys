@@ -8,16 +8,19 @@ import { estimateTokens, trimHistory } from "@/llm/trim.ts";
 export type StreamRequest =
   OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
 
-// Must match llama.cpp's ctx-size. Later: per model, stored on the agent
-const CONTEXT_SIZE = 8192;
-const MAX_REPLY_TOKENS = 1024;
-
 export function generateStreamRequest(
   agentConfig: AgentConfig,
   tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [],
   messages: OpenAI.Chat.ChatCompletionMessageParam[] = [],
   memoryContext = "",
 ): StreamRequest {
+  const contextWindow = Math.max(agentConfig.contextWindow, 2048);
+  // Never let the reply budget eat the whole window
+  const maxReplyTokens = Math.min(
+    Math.max(agentConfig.maxReplyTokens, 1),
+    contextWindow - 1024,
+  );
+
   const system: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system" as const, content: agentConfig.systemPrompt },
   ];
@@ -25,13 +28,13 @@ export function generateStreamRequest(
     system.push({ role: "system" as const, content: memoryContext });
   }
 
-  const budget = CONTEXT_SIZE - MAX_REPLY_TOKENS - estimateTokens(system) -
+  const budget = contextWindow - maxReplyTokens - estimateTokens(system) -
     estimateTokens(tools);
 
   const request = {
     model: agentConfig.model,
     messages: [...system, ...trimHistory(messages, budget)],
-    max_tokens: MAX_REPLY_TOKENS,
+    max_tokens: maxReplyTokens,
     stream: true as const,
     stream_options: { include_usage: true },
     ...(tools.length > 0 ? { tools } : {}),

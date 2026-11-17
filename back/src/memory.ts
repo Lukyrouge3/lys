@@ -141,10 +141,13 @@ export async function searchMemories(
   }
 }
 
-export async function recallMemories(query: string): Promise<MemoryHit[]> {
+export async function recallMemories(
+  query: string,
+  maxTokens = MAX_RECALL_TOKENS,
+): Promise<MemoryHit[]> {
   if (!query) return [];
   try {
-    const results = await searchMemories(query);
+    const results = await searchMemories(query, { maxTokens });
     return results.map(({ text, type }) => ({ text, type }));
   } catch {
     // searchMemories already logged it; a reply without memory is fine

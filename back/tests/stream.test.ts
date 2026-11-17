@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   addToolCallDeltas,
   generateStreamRequest,
@@ -10,6 +10,8 @@ const agentConfig: AgentConfig = {
   name: "test",
   model: "test-model",
   systemPrompt: "You are a test.",
+  contextWindow: 8192,
+  maxReplyTokens: 1024,
 };
 
 Deno.test("tool call arguments split across chunks are concatenated", () => {
@@ -112,4 +114,32 @@ Deno.test("request includes tools when given", () => {
     function: { name: "x", parameters: {} },
   }];
   assertEquals(generateStreamRequest(agentConfig, tools).tools, tools);
+});
+
+Deno.test("the reply limit comes from the agent", () => {
+  const request = generateStreamRequest(
+    { ...agentConfig, maxReplyTokens: 2048 },
+    [],
+  );
+  assertEquals(request.max_tokens, 2048);
+});
+
+Deno.test("a bigger context window keeps more history", () => {
+  const history = Array.from({ length: 40 }, (_, i) => ({
+    role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+    content: "x".repeat(800),
+  }));
+
+  const small = generateStreamRequest(
+    { ...agentConfig, contextWindow: 8192 },
+    [],
+    history,
+  );
+  const big = generateStreamRequest(
+    { ...agentConfig, contextWindow: 65536 },
+    [],
+    history,
+  );
+
+  assert(big.messages.length > small.messages.length);
 });

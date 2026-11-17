@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Agent" ADD COLUMN     "contextWindow" INTEGER NOT NULL DEFAULT 8192,
+ADD COLUMN     "maxReplyTokens" INTEGER NOT NULL DEFAULT 1024;

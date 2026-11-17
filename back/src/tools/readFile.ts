@@ -3,8 +3,12 @@ import { nextcloud } from "@/files/nextcloud.ts";
 import { normalizePath } from "@/files/paths.ts";
 import type { DavEntry } from "@/files/format.ts";
 
-// The chat model has an ~8k-token window, so a read has to stay small
-const MAX_CHARS = 8000;
+// Keep one read to roughly a fifth of the context window. At ~3 chars per
+// token, contextWindow * 0.6 chars is about 20% of the tokens.
+export function readLimit(contextWindow?: number): number {
+  const window = contextWindow ?? 8192;
+  return Math.min(120_000, Math.max(8_000, Math.floor(window * 0.6)));
+}
 
 const TEXT_EXTENSIONS = new Set([
   "txt",
@@ -65,7 +69,7 @@ export class ReadFileTool implements Tool {
   requireApproval = false;
 
   async run(
-    _context: ToolContext,
+    context: ToolContext,
     args: Record<string, unknown>,
   ): Promise<string> {
     const path = normalizePath(args.path);
@@ -93,9 +97,10 @@ export class ReadFileTool implements Tool {
       format: "text",
     }) as string;
 
-    if (content.length <= MAX_CHARS) return content;
+    const maxChars = readLimit(context.contextWindow);
+    if (content.length <= maxChars) return content;
     return `${
-      content.slice(0, MAX_CHARS)
-    }\n\n[truncated: showing the first ${MAX_CHARS} of ${content.length} characters]`;
+      content.slice(0, maxChars)
+    }\n\n[truncated: showing the first ${maxChars} of ${content.length} characters]`;
   }
 }

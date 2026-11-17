@@ -15,6 +15,8 @@ const agentConfig: AgentConfig = {
   name: "test",
   model: "test-model",
   systemPrompt: "You are a test.",
+  contextWindow: 8192,
+  maxReplyTokens: 1024,
 };
 
 function chunk(delta: Chunk["choices"][number]["delta"]): Chunk {

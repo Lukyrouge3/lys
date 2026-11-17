@@ -87,6 +87,7 @@ export async function runAgent({
           approval: ApprovalStatus.pending,
           emit,
           sendFile,
+          contextWindow: agentConfig.contextWindow,
         },
         toolCall.arguments,
       );
