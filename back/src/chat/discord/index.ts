@@ -4,6 +4,7 @@ import { getAgent } from "@/config/agentConfig.ts";
 import { getSession } from "@/chat/discord/session.ts";
 import { DiscordReply } from "@/chat/discord/reply.ts";
 import { handleInteraction } from "@/chat/discord/interaction.ts";
+import { startMailNotifications } from "@/chat/discord/mail.ts";
 
 export async function discordChat(
   agentName: string,
@@ -83,6 +84,7 @@ export async function discordChat(
 
   client.once(Events.ClientReady, (ready) => {
     logger.info(`Logged in to Discord as ${ready.user.tag}`);
+    startMailNotifications(client);
   });
 
   await client.login(token);

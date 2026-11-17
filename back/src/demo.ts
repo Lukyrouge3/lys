@@ -35,7 +35,9 @@ const objects = await client.fetchCalendarObjects({
 });
 
 const events = objects
-  .flatMap((o) => new ICAL.Component(ICAL.parse(o.data)).getAllSubcomponents("vevent"))
+  .flatMap((o) =>
+    new ICAL.Component(ICAL.parse(o.data)).getAllSubcomponents("vevent")
+  )
   .map((vevent) => new ICAL.Event(vevent))
   .sort((a, b) => a.startDate.compare(b.startDate))
   .slice(0, 3);
@@ -60,11 +62,16 @@ const event = new ICAL.Event(vevent);
 event.uid = crypto.randomUUID();
 event.summary = "test";
 event.startDate = ICAL.Time.fromJSDate(start, true);
-event.endDate = ICAL.Time.fromJSDate(new Date(start.getTime() + 3600 * 1000), true);
+event.endDate = ICAL.Time.fromJSDate(
+  new Date(start.getTime() + 3600 * 1000),
+  true,
+);
 
 const res = await client.createCalendarObject({
   calendar: personal,
   iCalString: vcalendar.toString(),
   filename: `${event.uid}.ics`,
 });
-console.log(`Created "test" on ${start.toLocaleString()} -> ${res.status} ${personal.url}${event.uid}.ics`);
+console.log(
+  `Created "test" on ${start.toLocaleString()} -> ${res.status} ${personal.url}${event.uid}.ics`,
+);

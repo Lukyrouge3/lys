@@ -1,4 +1,5 @@
 import { ImapFlow } from "imapflow";
+import PostalMime from "postal-mime";
 import prisma from "@/db.ts";
 import {
   getMailAccount,
@@ -10,6 +11,7 @@ import { logger } from "@/utils/logger.ts";
 
 const RECONNECT_MS = 30_000;
 const FOLDER = "INBOX";
+const PREVIEW_CHARS = 800;
 
 export type MailEvent = {
   account: string;
@@ -18,6 +20,8 @@ export type MailEvent = {
   from: string;
   subject: string;
   date: Date | null;
+  // First part of the plain-text body, for classification and notices
+  preview: string;
 };
 
 type Envelope = {
@@ -30,6 +34,7 @@ export function toMailEvent(
   account: string,
   folder: string,
   msg: { uid: number; envelope?: Envelope | null },
+  preview = "",
 ): MailEvent {
   const envelope = msg.envelope;
   const from = (envelope?.from ?? [])
@@ -49,7 +54,23 @@ export function toMailEvent(
     from: from || "(unknown sender)",
     subject: envelope?.subject?.trim() || "(no subject)",
     date: date && !Number.isNaN(date.getTime()) ? date : null,
+    preview,
   };
+}
+
+/** Plain text of a message, whitespace collapsed and cut short. */
+export async function mailPreview(
+  source?: Uint8Array | null,
+  limit = PREVIEW_CHARS,
+): Promise<string> {
+  if (!source || source.length === 0) return "";
+  try {
+    const parsed = await PostalMime.parse(source);
+    return (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
+  } catch {
+    // A message that cannot be parsed still has a usable envelope
+    return "";
+  }
 }
 
 /**
@@ -114,8 +135,10 @@ async function watchOnce(
   }
 
   const client = await openImap(account);
-  client.on("error", (err) =>
-    logger.warn(`Mail connection for ${account.name}: ${err.message}`));
+  client.on(
+    "error",
+    (err) => logger.warn(`Mail connection for ${account.name}: ${err.message}`),
+  );
 
   try {
     const lock = await client.getMailboxLock(FOLDER);
@@ -166,13 +189,16 @@ async function sweep(
 
   if (range) {
     for await (
-      const msg of client.fetch(range, { uid: true, envelope: true }, {
+      const msg of client.fetch(range, {
         uid: true,
-      })
+        envelope: true,
+        source: true,
+      }, { uid: true })
     ) {
       highest = Math.max(highest, msg.uid);
       try {
-        await onMail(toMailEvent(account.name, FOLDER, msg));
+        const preview = await mailPreview(msg.source);
+        await onMail(toMailEvent(account.name, FOLDER, msg, preview));
       } catch (err) {
         // One bad message must not stop the folder
         logger.warn(`Handling mail ${msg.uid} failed: ${err}`);

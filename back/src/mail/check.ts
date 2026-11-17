@@ -12,7 +12,9 @@ const idleSeconds = idleAt >= 0 ? Number(Deno.args[idleAt + 1] ?? 30) : 0;
 const account = await getMailAccount(args[0]);
 if (!account) {
   console.error(
-    `No enabled mail account${args[0] ? ` named "${args[0]}"` : ""} in the database.\n` +
+    `No enabled mail account${
+      args[0] ? ` named "${args[0]}"` : ""
+    } in the database.\n` +
       "Add one to prisma/seed.json and run: deno task db:seed",
   );
   Deno.exit(1);
@@ -50,7 +52,9 @@ try {
           ? new Date(msg.envelope.date).toISOString()
           : "?";
         console.log(
-          `  ${msg.uid}  ${date}  ${from}  ${msg.envelope?.subject ?? "(no subject)"}`,
+          `  ${msg.uid}  ${date}  ${from}  ${
+            msg.envelope?.subject ?? "(no subject)"
+          }`,
         );
       }
     }

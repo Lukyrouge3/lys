@@ -22,6 +22,7 @@
     "ical.js": "npm:ical.js@^2.2.1",
     "imapflow": "npm:imapflow@^2.12.1",
     "pg": "npm:pg@^8.23.1",
+    "postal-mime": "npm:postal-mime@^4.2.1",
     "prisma": "npm:prisma@^7.10.1",
     "tsdav": "npm:tsdav@^2.5.0",
     "webdav": "npm:webdav@^5.11.0",

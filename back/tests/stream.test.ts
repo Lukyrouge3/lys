@@ -95,7 +95,10 @@ Deno.test("no memory context means no extra message", () => {
     "",
   );
   assertEquals(request.messages.length, 2);
-  assertEquals(request.messages[0], { role: "system", content: "You are a test." });
+  assertEquals(request.messages[0], {
+    role: "system",
+    content: "You are a test.",
+  });
 });
 
 Deno.test("request leaves out tools when there are none", () => {
