@@ -53,14 +53,29 @@ export function addToolCallDeltas(
     [],
 ) {
   for (const toolCall of deltas) {
-    toolCalls[toolCall.index] ??= { id: "", name: "", arguments: "" };
-    const call = toolCalls[toolCall.index];
+    // A provider may skip an index (or announce one it never finishes), so the
+    // array is filled up to the index: iterating it must never yield undefined.
+    const index = toolCall.index ?? toolCalls.length;
+    while (toolCalls.length <= index) {
+      toolCalls.push({ id: "", name: "", arguments: "" });
+    }
+    const call = toolCalls[index];
     if (toolCall.id) call.id = toolCall.id;
     if (toolCall.function?.name) call.name = toolCall.function.name;
     if (toolCall.function?.arguments) {
       call.arguments += toolCall.function.arguments;
     }
   }
+}
+
+/**
+ * The calls worth storing. One without an id cannot be answered, and one
+ * without a name cannot be run; either would produce an invalid next request.
+ */
+export function usableToolCalls(
+  toolCalls: StreamedToolCall[],
+): StreamedToolCall[] {
+  return toolCalls.filter((call) => call.id !== "" && call.name !== "");
 }
 
 export async function streamResponse(
@@ -118,7 +133,7 @@ export async function streamResponse(
         conversationId: conversationId,
       },
     });
-    return { content, llmCall, toolCalls };
+    return { content, llmCall, toolCalls: usableToolCalls(toolCalls) };
   } catch (err) {
     dump({ error: String(err) });
     await prisma.llmCall.create({

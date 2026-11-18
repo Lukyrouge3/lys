@@ -105,7 +105,12 @@ export async function runAgent({
 
       const storedCall = assistantMsg.toolCalls.find((call) =>
         call.apiId === toolCall.id
-      )!;
+      );
+      if (!storedCall) {
+        throw new Error(
+          `Tool call ${toolCall.id} (${toolCall.name}) was not stored`,
+        );
+      }
       storedCall.result = text;
       await prisma.toolCall.update({
         where: { id: storedCall.id },
@@ -135,6 +140,8 @@ export async function runAgent({
       logger.debug(`Tool call result for ${toolCall.name}: ${text}`);
     }
     messages.push(...toModelMessage(assistantMsg));
-    if (toolCalls.length == 0 || paused) break;
+    // The last round is called without tools to force a text answer. Some
+    // providers call tools anyway, so the cap has to end the loop by itself.
+    if (toolCalls.length == 0 || paused || iteration >= MAX_TOOL_ROUNDS) break;
   }
 }

@@ -3,6 +3,7 @@ import {
   addToolCallDeltas,
   generateStreamRequest,
   StreamedToolCall,
+  usableToolCalls,
 } from "@/llm/stream.ts";
 import { AgentConfig } from "@/config/agentConfig.ts";
 
@@ -58,6 +59,33 @@ Deno.test("chunks without tool calls change nothing", () => {
   addToolCallDeltas(toolCalls, undefined);
   addToolCallDeltas(toolCalls, []);
   assertEquals(toolCalls, []);
+});
+
+Deno.test("a skipped index does not leave a hole", () => {
+  const toolCalls: StreamedToolCall[] = [];
+  addToolCallDeltas(toolCalls, [
+    { index: 0, id: "a", function: { name: "first", arguments: "{}" } },
+    { index: 2, id: "c", function: { name: "third", arguments: "{}" } },
+  ]);
+
+  // Iterating the array used to yield undefined for the hole at index 1
+  assertEquals(
+    usableToolCalls(toolCalls).map((call) => call.name),
+    ["first", "third"],
+  );
+});
+
+Deno.test("calls the provider never finished are dropped", () => {
+  const incomplete: StreamedToolCall[] = [
+    { id: "a", name: "first", arguments: "{}" },
+    { id: "", name: "", arguments: "" }, // placeholder left by a skipped index
+    { id: "", name: "second", arguments: "{}" }, // no id: cannot be answered
+    { id: "d", name: "", arguments: "{}" }, // no name: cannot be run
+  ];
+
+  assertEquals(usableToolCalls(incomplete), [
+    { id: "a", name: "first", arguments: "{}" },
+  ]);
 });
 
 Deno.test("request starts with the system prompt", () => {

@@ -177,6 +177,67 @@ Deno.test({
       },
     );
 
+    await t.step("calls at skipped indexes all run", async () => {
+      const { provider, conversationId } = await setup();
+      const { openai } = fakeOpenAI((_, call) =>
+        call === 0
+          ? [
+            chunk({
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call-1",
+                  function: {
+                    name: "get_weather",
+                    arguments: '{"city":"Paris"}',
+                  },
+                },
+                {
+                  index: 2,
+                  id: "call-2",
+                  function: {
+                    name: "get_weather",
+                    arguments: '{"city":"Lyon"}',
+                  },
+                },
+              ],
+            }),
+          ]
+          : textReply("Both done")
+      );
+
+      await run(openai, provider, conversationId, [
+        { role: "user", content: "two cities" },
+      ]);
+
+      // The hole at index 1 used to reach the loop as undefined and throw
+      const stored = await prisma.toolCall.findMany({
+        orderBy: { apiId: "asc" },
+      });
+      assertEquals(stored.map((call) => call.apiId), ["call-1", "call-2"]);
+      assert(stored.every((call) => call.result?.includes("city")));
+    });
+
+    await t.step("a call with no id is dropped, not stored", async () => {
+      const { provider, conversationId } = await setup();
+      const { openai, requests } = fakeOpenAI(() => [
+        chunk({
+          tool_calls: [{
+            index: 0,
+            function: { name: "get_weather", arguments: '{"city":"Paris"}' },
+          }],
+        }),
+      ]);
+
+      await run(openai, provider, conversationId, [
+        { role: "user", content: "hi" },
+      ]);
+
+      // Storing it would send tool_call_id "" back to the provider next turn
+      assertEquals(await prisma.toolCall.count(), 0);
+      assertEquals(requests.length, 1);
+    });
+
     await t.step("an unknown tool stores the error as its result", async () => {
       const { provider, conversationId } = await setup();
       const { openai } = fakeOpenAI((_, call) =>
@@ -231,6 +292,25 @@ Deno.test({
         content: "Giving up on tools",
       });
     });
+
+    await t.step(
+      "a provider that keeps calling tools still stops",
+      async () => {
+        const { provider, conversationId } = await setup();
+        // Ignores the final no-tools round and calls a tool anyway
+        const { openai, requests } = fakeOpenAI((_, call) =>
+          toolCallReply(`call-${call}`, "get_weather", '{"city":"Paris"}')
+        );
+
+        await run(openai, provider, conversationId, [
+          { role: "user", content: "weather?" },
+        ]);
+
+        // Before the cap ended the loop, this ran until the process was killed
+        assertEquals(requests.length, 6);
+        assertEquals(requests[5].tools, undefined);
+      },
+    );
 
     await t.step(
       "only the first 5 tool calls of a response are kept",
