@@ -3,7 +3,7 @@ import { AgentConfig } from "@/config/agentConfig.ts";
 import { ApprovalStatus, Provider } from "@/generated/prisma/client.ts";
 import { generateStreamRequest, streamResponse } from "@/llm/stream.ts";
 import { createAssistantMessage, toModelMessage } from "@/llm/message.ts";
-import { runTool } from "@/tools/tool.ts";
+import { runTool, ToolRegistry } from "@/tools/tool.ts";
 import prisma from "@/db.ts";
 import { logger } from "@/utils/logger.ts";
 import { EmitEvent } from "@/agent/events.ts";
@@ -15,6 +15,8 @@ export type RunAgentOptions = {
   openai: OpenAI;
   agentConfig: AgentConfig;
   tools: OpenAI.Chat.ChatCompletionTool[];
+  /** Which tools a call may reach; production unless a test injects its own. */
+  registry?: ToolRegistry;
   messages: OpenAI.Chat.ChatCompletionMessageParam[];
   conversationId: string;
   trigger: string;
@@ -30,6 +32,7 @@ export async function runAgent({
   openai,
   agentConfig,
   tools,
+  registry,
   messages,
   conversationId,
   trigger,
@@ -90,6 +93,7 @@ export async function runAgent({
           contextWindow: agentConfig.contextWindow,
         },
         toolCall.arguments,
+        registry,
       );
 
       const text = result.status === "ok"

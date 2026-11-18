@@ -1,7 +1,5 @@
 import OpenAI from "@openai/openai";
-import { GetWeatherTool } from "@/tools/web/getWeather.ts";
 import { SetTitleTool } from "@/tools/chat/setTitle.ts";
-import { FakeSendEmailTool } from "@/tools/demo/fakeSendEmail.ts";
 import { RecallMemoryTool } from "@/tools/memory/recallMemory.ts";
 import { SaveMemoryTool } from "@/tools/memory/saveMemory.ts";
 import { ShareFolderTool } from "@/tools/files/shareFolder.ts";
@@ -17,11 +15,11 @@ import { DeleteFileTool } from "@/tools/files/deleteFile.ts";
 import { EmitEvent } from "@/agent/events.ts";
 import { ApprovalStatus } from "@/generated/prisma/enums.ts";
 
-const tools = new Map<string, Tool>(
+export type ToolRegistry = Map<string, Tool>;
+
+export const defaultTools: ToolRegistry = new Map<string, Tool>(
   [
-    new GetWeatherTool(),
     new SetTitleTool(),
-    new FakeSendEmailTool(),
     new RecallMemoryTool(),
     new SaveMemoryTool(),
     new ShareFolderTool(),
@@ -56,9 +54,11 @@ export interface Tool {
   ) => Promise<string>;
 }
 
-export function generateToolRequest(): OpenAI.Chat.ChatCompletionTool[] {
+export function generateToolRequest(
+  registry: ToolRegistry = defaultTools,
+): OpenAI.Chat.ChatCompletionTool[] {
   const toolRequests: OpenAI.Chat.ChatCompletionTool[] = [];
-  for (const tool of tools.values()) {
+  for (const tool of registry.values()) {
     const toolRequest = {
       type: "function" as const,
       function: {
@@ -107,8 +107,9 @@ export async function runTool(
   toolName: string,
   toolContext: ToolContext,
   args: string,
+  registry: ToolRegistry = defaultTools,
 ): Promise<ToolResult> {
-  const tool = tools.get(toolName);
+  const tool = registry.get(toolName);
   if (!tool) {
     return { status: "error", content: `Tool ${toolName} not found` };
   }

@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { generateToolRequest, runTool, ToolContext } from "@/tools/tool.ts";
+import { testTools } from "./doubles.ts";
 
 const context: ToolContext = {
   conversationId: "test-conversation",
@@ -9,50 +10,65 @@ const context: ToolContext = {
 const approved: ToolContext = { ...context, approval: "approved" };
 
 Deno.test("tool request has the OpenAI function schema", () => {
-  const weather = generateToolRequest().find((tool) =>
-    tool.type === "function" && tool.function.name === "get_weather"
+  const title = generateToolRequest().find((tool) =>
+    tool.type === "function" && tool.function.name === "set_title"
   );
 
-  assertEquals(weather, {
+  assertEquals(title, {
     type: "function",
     function: {
-      name: "get_weather",
-      description: "Get the current weather for a city",
+      name: "set_title",
+      description: "Set the title of the current conversation",
       parameters: {
         type: "object",
-        properties: { city: { type: "string", description: "City name" } },
-        required: ["city"],
+        properties: {
+          title: {
+            type: "string",
+            description:
+              "New title for the conversation. Must be between 3 and 64 characters.",
+          },
+        },
+        required: ["title"],
       },
     },
   });
 });
 
+Deno.test("the model is never offered a fake tool", () => {
+  const names = generateToolRequest().map((tool) =>
+    tool.type === "function" ? tool.function.name : ""
+  );
+
+  assert(!names.includes("get_weather"), "get_weather is a stub, not a tool");
+  assert(!names.includes("send_email"), "sending mail is not implemented yet");
+});
+
 Deno.test("a tool that needs approval isn't run until approved", async () => {
   assertEquals(
-    await runTool("send_email", context, '{"to":"a@b.c","subject":"hi"}'),
+    await runTool(
+      "send_email",
+      context,
+      '{"to":"a@b.c","subject":"hi"}',
+      testTools(),
+    ),
     { status: "pendingApproval" },
   );
 });
 
 Deno.test("an approved tool that needs approval runs", async () => {
-  const result = await runTool(
-    "send_email",
-    approved,
-    '{"to":"a@b.c","subject":"hi"}',
+  assertEquals(
+    await runTool(
+      "send_email",
+      approved,
+      '{"to":"a@b.c","subject":"hi"}',
+      testTools(),
+    ),
+    { status: "ok", content: 'Email "hi" sent to a@b.c' },
   );
-  assertEquals(result.status, "ok");
-});
-
-Deno.test("an approved tool runs and returns its content", async () => {
-  const result = await runTool("get_weather", context, '{"city":"Paris"}');
-  assertEquals(result.status, "ok");
-  if (result.status === "ok") {
-    assertEquals(JSON.parse(result.content).city, "Paris");
-  }
 });
 
 Deno.test("malformed arguments return an error result", async () => {
-  const result = await runTool("get_weather", context, '{"city": "Par');
+  const result = await runTool("share_folder", context, '{"path": "Par');
   assertEquals(result.status, "error");
 });
 

@@ -2,6 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import OpenAI from "@openai/openai";
 import prisma from "@/db.ts";
 import { closeDb, truncate } from "./db.ts";
+import { testTools } from "./doubles.ts";
 import { runAgent } from "@/agent/agent.ts";
 import { canResume, resolveApproval } from "@/agent/approval.ts";
 import { AgentEvent, EmitEvent } from "@/agent/events.ts";
@@ -11,6 +12,10 @@ import { Provider } from "@/generated/prisma/client.ts";
 
 type Chunk = OpenAI.Chat.Completions.ChatCompletionChunk;
 type Request = OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+
+// The production registry has no harmless tool and no mail sender, so the loop
+// is exercised with two doubles instead.
+const tools = testTools();
 
 const agentConfig: AgentConfig = {
   name: "test",
@@ -99,7 +104,8 @@ function run(
   return runAgent({
     openai,
     agentConfig,
-    tools: generateToolRequest(),
+    tools: generateToolRequest(tools),
+    registry: tools,
     messages,
     conversationId,
     trigger: "test",
@@ -339,6 +345,8 @@ Deno.test({
         conversationId,
         true,
         () => {},
+        undefined,
+        tools,
       );
       assertEquals(await canResume(resolved!, messages), true);
     });
@@ -381,6 +389,8 @@ Deno.test({
           conversationId,
           true,
           () => {},
+          undefined,
+          tools,
         );
         assertEquals(await canResume(one!, messages), false);
         const two = await resolveApproval(
@@ -388,6 +398,8 @@ Deno.test({
           conversationId,
           false,
           () => {},
+          undefined,
+          tools,
         );
         assertEquals(await canResume(two!, messages), true);
       },
@@ -406,6 +418,8 @@ Deno.test({
           conversationId,
           true,
           () => {},
+          undefined,
+          tools,
         );
         assertEquals(await canResume(resolved!, messages), false);
       },
@@ -418,6 +432,8 @@ Deno.test({
         conversationId,
         true,
         () => {},
+        undefined,
+        tools,
       );
       assertEquals(resolved?.result, 'Email "hi" sent to a@b.c');
       const stored = await prisma.toolCall.findUniqueOrThrow({
@@ -434,6 +450,8 @@ Deno.test({
         conversationId,
         false,
         () => {},
+        undefined,
+        tools,
       );
       assertStringIncludes(resolved!.result!, "Rejected");
       const stored = await prisma.toolCall.findUniqueOrThrow({

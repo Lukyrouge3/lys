@@ -1,7 +1,7 @@
 import OpenAI from "@openai/openai";
 import prisma from "@/db.ts";
 import { ApprovalStatus, ToolCall } from "@/generated/prisma/client.ts";
-import { runTool } from "@/tools/tool.ts";
+import { defaultTools, runTool, ToolRegistry } from "@/tools/tool.ts";
 import { EmitEvent } from "@/agent/events.ts";
 
 const REJECTED_RESULT =
@@ -27,6 +27,7 @@ export async function resolveApproval(
   approved: boolean,
   emit: EmitEvent,
   sendFile?: (file: { name: string; data: Uint8Array }) => Promise<void>,
+  registry: ToolRegistry = defaultTools,
 ): Promise<ToolCall | null> {
   // Claiming it in one update is what makes a second click a no-op
   const claimed = await prisma.toolCall.updateMany({
@@ -52,6 +53,7 @@ export async function resolveApproval(
       call.name,
       { conversationId, approval: ApprovalStatus.approved, emit, sendFile },
       call.arguments,
+      registry,
     );
     result = toolResult.status === "ok"
       ? toolResult.content
