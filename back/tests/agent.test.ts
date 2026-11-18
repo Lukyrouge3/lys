@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import OpenAI from "@openai/openai";
 import prisma from "@/db.ts";
+import { closeDb, truncate } from "./db.ts";
 import { runAgent } from "@/agent/agent.ts";
 import { canResume, resolveApproval } from "@/agent/approval.ts";
 import { AgentEvent, EmitEvent } from "@/agent/events.ts";
@@ -68,8 +69,13 @@ function fakeOpenAI(reply: (request: Request, call: number) => Chunk[]) {
 }
 
 async function setup() {
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE "ToolCall", "Message", "LlmCall", "Conversation", "Provider", "Secret" CASCADE`,
+  await truncate(
+    "ToolCall",
+    "Message",
+    "LlmCall",
+    "Conversation",
+    "Provider",
+    "Secret",
   );
   const secret = await prisma.secret.create({
     data: { name: "test-key", value: "unused" },
@@ -463,6 +469,6 @@ Deno.test({
       },
     );
 
-    await prisma.$disconnect();
+    await closeDb();
   },
 });

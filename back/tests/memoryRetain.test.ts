@@ -1,5 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import prisma from "@/db.ts";
+import { closeDb, truncate } from "./db.ts";
 import { retainConversation, saveMemory } from "@/memory.ts";
 import {
   HindsightClient,
@@ -30,9 +31,7 @@ function captureRetain(
 const t0 = new Date("2026-11-15T10:00:00Z");
 
 async function setupConversation() {
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE "ToolCall", "Message", "LlmCall", "Conversation" CASCADE`,
-  );
+  await truncate("ToolCall", "Message", "LlmCall", "Conversation");
   return await prisma.conversation.create({ data: { name: "memory test" } });
 }
 
@@ -358,7 +357,7 @@ Deno.test({
       );
     } finally {
       HindsightClient.prototype.retain = originalRetain;
-      await prisma.$disconnect();
+      await closeDb();
     }
   },
 });

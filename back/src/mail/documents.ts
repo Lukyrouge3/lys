@@ -32,6 +32,7 @@ export function sanitizeName(value: string, limit = MAX_NAME_CHARS): string {
   const cleaned = value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    // deno-lint-ignore no-control-regex -- stripping control characters is the point
     .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
     .replace(/\s+/g, " ")
     .trim()

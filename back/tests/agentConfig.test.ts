@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import prisma from "@/db.ts";
+import { closeDb, truncate } from "./db.ts";
 import { getAgent } from "@/config/agentConfig.ts";
 
 Deno.test({
@@ -7,9 +8,7 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   async fn(t) {
-    await prisma.$executeRawUnsafe(
-      `TRUNCATE "Agent", "Provider", "Secret" CASCADE`,
-    );
+    await truncate("Agent", "Provider", "Secret");
     const secret = await prisma.secret.create({
       data: { name: "test-key", value: "unused" },
     });
@@ -46,6 +45,6 @@ Deno.test({
       );
     });
 
-    await prisma.$disconnect();
+    await closeDb();
   },
 });
