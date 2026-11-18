@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { normalizeFolder, normalizePath } from "@/files/paths.ts";
+import { normalizeFolder, normalizePath, parentOf } from "@/files/paths.ts";
+import { putFile } from "@/files/nextcloud.ts";
 import { readLimit } from "@/tools/files/readFile.ts";
 import {
   entryPath,
@@ -11,6 +12,60 @@ import {
 
 Deno.test("paths lose their leading and trailing slashes", () => {
   assertEquals(normalizePath(" /Mail/2026/ "), "Mail/2026");
+});
+
+Deno.test("the parent of a root file is the root", () => {
+  assertEquals(parentOf("todo.md"), "");
+  assertEquals(parentOf("Notes/a.md"), "Notes");
+  assertEquals(parentOf("Mail/2026/a.pdf"), "Mail/2026");
+});
+
+// The smallest stand-in for the DAV client that putFile uses.
+function fakeDav(exists = false) {
+  const calls: string[] = [];
+  return {
+    calls,
+    client: {
+      exists: (path: string) => {
+        calls.push(`exists ${path}`);
+        return Promise.resolve(exists);
+      },
+      createDirectory: (path: string) => {
+        calls.push(`mkdir ${path}`);
+        return Promise.resolve();
+      },
+      putFileContents: (path: string) => {
+        calls.push(`put ${path}`);
+        return Promise.resolve(true);
+      },
+    },
+  };
+}
+
+Deno.test("a file at the root creates no folder", async () => {
+  const dav = fakeDav();
+  await putFile("todo.md", new Uint8Array([1]), dav.client);
+
+  // A folder named "todo.m" used to be created before writing the file
+  assertEquals(dav.calls, ["put todo.md"]);
+});
+
+Deno.test("a nested file creates its missing parent", async () => {
+  const dav = fakeDav();
+  await putFile("Notes/todo.md", new Uint8Array([1]), dav.client);
+
+  assertEquals(dav.calls, [
+    "exists Notes",
+    "mkdir Notes",
+    "put Notes/todo.md",
+  ]);
+});
+
+Deno.test("an existing parent is left alone", async () => {
+  const dav = fakeDav(true);
+  await putFile("Notes/todo.md", new Uint8Array([1]), dav.client);
+
+  assertEquals(dav.calls, ["exists Notes", "put Notes/todo.md"]);
 });
 
 Deno.test("an empty path is rejected", () => {

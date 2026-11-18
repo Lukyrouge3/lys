@@ -11,6 +11,12 @@ export function normalizeFolder(value: unknown): string {
   return clean(value);
 }
 
+/** The folder that contains this path; "" when the path is at the root. */
+export function parentOf(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? "" : path.slice(0, slash);
+}
+
 function clean(value: unknown): string {
   if (value === undefined || value === null) return "";
   if (typeof value !== "string") {

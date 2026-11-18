@@ -1,6 +1,6 @@
 import type { Tool, ToolContext } from "@/tools/tool.ts";
 import { nextcloud } from "@/files/nextcloud.ts";
-import { normalizePath } from "@/files/paths.ts";
+import { normalizePath, parentOf } from "@/files/paths.ts";
 import { moveLedgerPaths, syncLedger } from "@/mail/ledger.ts";
 
 export class MoveFileTool implements Tool {
@@ -32,7 +32,7 @@ export class MoveFileTool implements Tool {
       );
     }
 
-    const parent = to.slice(0, to.lastIndexOf("/"));
+    const parent = parentOf(to);
     if (parent && !(await dav.exists(parent))) {
       await dav.createDirectory(parent, { recursive: true });
     }

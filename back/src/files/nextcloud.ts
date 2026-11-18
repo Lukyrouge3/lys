@@ -1,4 +1,5 @@
 import { createClient, type WebDAVClient } from "webdav";
+import { parentOf } from "@/files/paths.ts";
 
 let client: WebDAVClient | null = null;
 
@@ -20,12 +21,18 @@ export function nextcloud(): WebDAVClient {
   return client;
 }
 
+/** The part of the DAV client putFile needs, so it can be tested without one. */
+export type DavWriter = Pick<
+  WebDAVClient,
+  "exists" | "createDirectory" | "putFileContents"
+>;
+
 export async function putFile(
   path: string,
   content: Uint8Array,
+  dav: DavWriter = nextcloud(),
 ): Promise<void> {
-  const dav = nextcloud();
-  const folder = path.slice(0, path.lastIndexOf("/"));
+  const folder = parentOf(path);
   if (folder && !(await dav.exists(folder))) {
     await dav.createDirectory(folder, { recursive: true });
   }
