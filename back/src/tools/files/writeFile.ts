@@ -51,7 +51,11 @@ export class WriteFileTool implements Tool {
       }
     }
 
-    await putFile(path, new TextEncoder().encode(content));
+    // The explicit argument is what allows a replace; without it the server
+    // rejects the write instead of the file silently disappearing.
+    await putFile(path, new TextEncoder().encode(content), {
+      overwrite: args.overwrite === true,
+    });
     return `Wrote ${content.length} characters to "${path}".`;
   }
 }

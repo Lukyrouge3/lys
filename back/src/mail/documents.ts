@@ -115,7 +115,9 @@ export async function storeAttachments(
         );
       }
 
-      await putFile(path, attachment.content);
+      // The name is chosen above to be free, and the alternative to replacing
+      // is losing the attachment, so the mail pipeline opts in explicitly.
+      await putFile(path, attachment.content, { overwrite: true });
       await prisma.mailDocument.create({
         data: {
           accountId: mail.accountId,

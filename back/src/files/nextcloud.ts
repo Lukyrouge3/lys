@@ -27,14 +27,21 @@ export type DavWriter = Pick<
   "exists" | "createDirectory" | "putFileContents"
 >;
 
+export type PutOptions = {
+  /** Replace an existing file. Off by default: a write never clobbers by accident. */
+  overwrite?: boolean;
+  /** Injected in tests; the real client otherwise. */
+  dav?: DavWriter;
+};
+
 export async function putFile(
   path: string,
   content: Uint8Array,
-  dav: DavWriter = nextcloud(),
+  { overwrite = false, dav = nextcloud() }: PutOptions = {},
 ): Promise<void> {
   const folder = parentOf(path);
   if (folder && !(await dav.exists(folder))) {
     await dav.createDirectory(folder, { recursive: true });
   }
-  await dav.putFileContents(path, content.slice().buffer, { overwrite: true });
+  await dav.putFileContents(path, content.slice().buffer, { overwrite });
 }

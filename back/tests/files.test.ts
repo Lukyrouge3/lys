@@ -34,8 +34,12 @@ function fakeDav(exists = false) {
         calls.push(`mkdir ${path}`);
         return Promise.resolve();
       },
-      putFileContents: (path: string) => {
-        calls.push(`put ${path}`);
+      putFileContents: (
+        path: string,
+        _data?: unknown,
+        options?: { overwrite?: boolean },
+      ) => {
+        calls.push(`put ${path}${options?.overwrite ? " (overwrite)" : ""}`);
         return Promise.resolve(true);
       },
     },
@@ -44,7 +48,7 @@ function fakeDav(exists = false) {
 
 Deno.test("a file at the root creates no folder", async () => {
   const dav = fakeDav();
-  await putFile("todo.md", new Uint8Array([1]), dav.client);
+  await putFile("todo.md", new Uint8Array([1]), { dav: dav.client });
 
   // A folder named "todo.m" used to be created before writing the file
   assertEquals(dav.calls, ["put todo.md"]);
@@ -52,7 +56,7 @@ Deno.test("a file at the root creates no folder", async () => {
 
 Deno.test("a nested file creates its missing parent", async () => {
   const dav = fakeDav();
-  await putFile("Notes/todo.md", new Uint8Array([1]), dav.client);
+  await putFile("Notes/todo.md", new Uint8Array([1]), { dav: dav.client });
 
   assertEquals(dav.calls, [
     "exists Notes",
@@ -63,9 +67,23 @@ Deno.test("a nested file creates its missing parent", async () => {
 
 Deno.test("an existing parent is left alone", async () => {
   const dav = fakeDav(true);
-  await putFile("Notes/todo.md", new Uint8Array([1]), dav.client);
+  await putFile("Notes/todo.md", new Uint8Array([1]), { dav: dav.client });
 
   assertEquals(dav.calls, ["exists Notes", "put Notes/todo.md"]);
+});
+
+Deno.test("a write replaces a file only when asked", async () => {
+  const plain = fakeDav();
+  await putFile("todo.md", new Uint8Array([1]), { dav: plain.client });
+  // Enforced by the server (If-None-Match), not by a check-then-write race
+  assertEquals(plain.calls, ["put todo.md"]);
+
+  const forced = fakeDav();
+  await putFile("todo.md", new Uint8Array([1]), {
+    overwrite: true,
+    dav: forced.client,
+  });
+  assertEquals(forced.calls, ["put todo.md (overwrite)"]);
 });
 
 Deno.test("an empty path is rejected", () => {
