@@ -274,12 +274,16 @@ async function watchOnce(
     // follow-up cannot overlap the catch-up in flight.
     client.on("exists", schedule);
 
+    // Listening before the catch-up, so a connection that dies during it is
+    // noticed instead of being missed by a listener attached too late.
+    const ended = watchEnd(client, signal);
+
     await sweep(client, account, onMail);
     logger.info(
       `Watching ${account.address} (${FOLDER}) for new mail`,
     );
 
-    const end = await watchEnd(client, signal);
+    const end = await ended;
     client.off("exists", schedule);
     await queue;
     if (end === "closed") {
