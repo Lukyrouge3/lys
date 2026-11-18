@@ -418,7 +418,7 @@ Deno.test({
     );
 
     await t.step("resumes once the pending call is decided", async () => {
-      const { call, conversationId, messages } = await pendingCall();
+      const { call, conversationId } = await pendingCall();
       assertEquals(await canResume(call, conversationId), false);
       const resolved = await resolveApproval(
         call.id,
