@@ -7,7 +7,7 @@ import {
   openImap,
   WATCH_IDLE_DELAY_MS,
 } from "@/mail/account.ts";
-import { uidWindow } from "@/mail/state.ts";
+import { type FolderState, folderStateAfter, uidWindow } from "@/mail/state.ts";
 import { logger } from "@/utils/logger.ts";
 
 const RECONNECT_MS = 30_000;
@@ -303,23 +303,35 @@ async function sweep(
     // A pushed EXISTS carries no UIDs, and mailbox.uidNext is only refreshed by
     // SELECT/STATUS - it does not move on its own. Without this the window
     // below is computed from the uidNext of the last SELECT and comes out
-    // empty, so pushed mail would never be fetched.
-    const status = await client.status(FOLDER, { uidNext: true });
-    if (!status) throw new Error(`Could not read ${FOLDER} status`);
+    // empty, so pushed mail would never be fetched. uidValidity is asked for
+    // too: a mailbox can be rewritten while this connection stays up, and the
+    // SELECT that opened it is long gone.
+    const status = await client.status(FOLDER, {
+      uidNext: true,
+      uidValidity: true,
+    });
+    if (
+      !status || status.uidNext === undefined ||
+      status.uidValidity === undefined
+    ) {
+      throw new Error(`Could not read ${FOLDER} status`);
+    }
+    const mailbox = {
+      uidValidity: status.uidValidity,
+      uidNext: status.uidNext,
+    };
 
-    const box = client.mailbox;
-    if (!box) return;
-
-    const state = await prisma.mailFolder.findUnique({
+    const row = await prisma.mailFolder.findUnique({
       where: { accountId_path: { accountId: account.id, path: FOLDER } },
     });
-    const { firstUid } = uidWindow(
-      { uidValidity: state?.uidValidity ?? null, lastUid: state?.lastUid ?? 0 },
-      { uidValidity: box.uidValidity, uidNext: box.uidNext },
-    );
+    const state: FolderState = {
+      uidValidity: row?.uidValidity ?? null,
+      lastUid: row?.lastUid ?? 0,
+    };
 
-    const range = uidRange(firstUid, box.uidNext);
-    let highest = Math.max(state?.lastUid ?? 0, box.uidNext - 1);
+    const { firstUid } = uidWindow(state, mailbox);
+    const range = uidRange(firstUid, mailbox.uidNext);
+    let highestFetched = 0;
 
     if (range) {
       for await (
@@ -329,7 +341,7 @@ async function sweep(
           source: true,
         }, { uid: true })
       ) {
-        highest = Math.max(highest, msg.uid);
+        highestFetched = Math.max(highestFetched, msg.uid);
         try {
           const { preview, attachments } = await parseMail(msg.source);
           await onMail(
@@ -343,15 +355,13 @@ async function sweep(
       }
     }
 
+    // Never derived from the old cursor: after a reset that value belongs to a
+    // UID space that no longer exists.
+    const next = folderStateAfter(state, mailbox, highestFetched);
     await prisma.mailFolder.upsert({
       where: { accountId_path: { accountId: account.id, path: FOLDER } },
-      update: { uidValidity: box.uidValidity, lastUid: highest },
-      create: {
-        accountId: account.id,
-        path: FOLDER,
-        uidValidity: box.uidValidity,
-        lastUid: highest,
-      },
+      update: next,
+      create: { accountId: account.id, path: FOLDER, ...next },
     });
   } finally {
     lock.release();
