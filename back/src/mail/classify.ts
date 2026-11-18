@@ -38,17 +38,20 @@ const DOCUMENT_PROMPT =
 Answer with exactly one word, from this list:
 ${DOCUMENT_CATEGORIES.join(", ")}
 
-- invoice: bills to pay
+- invoice: bills to pay, except medical ones
 - receipt: proof of a purchase or payment
 - contract: agreements, terms, subscriptions
-- insurance: policies, claims, coverage
-- medical: results, prescriptions, appointments
+- insurance: policies and coverage letters that are not about health care
+- medical: results, prescriptions, appointments, and bills for care from a doctor, practice, lab, hospital, pharmacy or health insurer
 - tax: declarations, tax office letters
 - travel: tickets, bookings, boarding passes
 - identity: passports, IDs, certificates, diplomas
 - other: anything that does not fit
 
-Judge by the file name, its type and the mail around it. If you cannot tell, answer other.`;
+Judge by the file name, its type and the mail around it, but what the document
+is about decides: who sends it or pays it only breaks a tie. A bill for medical
+care is medical even when it is addressed to an insurer and looks like an
+invoice. If you cannot tell, answer other.`;
 
 const MAX_PREVIEW_CHARS = 800;
 

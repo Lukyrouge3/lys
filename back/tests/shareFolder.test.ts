@@ -4,7 +4,7 @@ import {
   normalizePath,
   parseMode,
   ShareFolderTool,
-} from "@/tools/shareFolder.ts";
+} from "@/tools/files/shareFolder.ts";
 import { generateToolRequest, runTool, ToolContext } from "@/tools/tool.ts";
 
 const context: ToolContext = {

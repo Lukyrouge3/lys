@@ -65,7 +65,7 @@ Deno.test("nothing is fetched when the folder is fully read", () => {
 
 const encoder = new TextEncoder();
 
-Deno.test("the preview is the plain text body, whitespace collapsed", async () => {
+Deno.test("the preview keeps its line breaks, without extra spaces", async () => {
   const raw = [
     "From: Ana <ana@example.com>",
     "Subject: Lunch?",
@@ -78,7 +78,45 @@ Deno.test("the preview is the plain text body, whitespace collapsed", async () =
 
   assertEquals(
     (await parseMail(encoder.encode(raw))).preview,
-    "Are you free at 13:00? Ana",
+    "Are you free at 13:00?\n\nAna",
+  );
+});
+
+Deno.test("a reply keeps only the new text above the quote", async () => {
+  const raw = [
+    "Subject: Re: Lunch?",
+    "Content-Type: text/plain",
+    "",
+    "Yes, 13:00 works.",
+    "",
+    "On Mon, Nov 17, 2026 at 09:00 Ana <ana@example.com> wrote:",
+    "> Are you free at 13:00?",
+  ].join("\r\n");
+
+  assertEquals(
+    (await parseMail(encoder.encode(raw))).preview,
+    "Yes, 13:00 works.",
+  );
+});
+
+Deno.test("a bare forward shows the quoted mail, not its header block", async () => {
+  const raw = [
+    "Subject: Fwd: Facture",
+    "Content-Type: text/plain",
+    "",
+    "-------- Message original --------",
+    "Sujet: Copie de la facture",
+    "Date: Lundi, Novembre 16, 2026 23:46 CET",
+    "De: Archipel Swiss SA <archipel@hin.ch>",
+    "Pour: TORRENTE Florian <florian@deneria.net>",
+    "",
+    "Bonjour,",
+    "Veuillez trouver ci-joint la copie de la facture.",
+  ].join("\r\n");
+
+  assertEquals(
+    (await parseMail(encoder.encode(raw))).preview,
+    "Bonjour,\nVeuillez trouver ci-joint la copie de la facture.",
   );
 });
 

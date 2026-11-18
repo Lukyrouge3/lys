@@ -5,6 +5,7 @@ import {
   classifyPrompt,
   classifyWith,
   documentPrompt,
+  documentRequest,
   parseCategory,
   parseImportance,
 } from "@/mail/classify.ts";
@@ -123,6 +124,18 @@ Deno.test("the document prompt carries name, type and context", () => {
   assertEquals(prompt.includes("Type: application/pdf"), true);
   assertEquals(prompt.includes("Subject: Your bill"), true);
   assertEquals(prompt.endsWith("Payment due by Friday."), true);
+});
+
+Deno.test("the document prompt keeps medical bills out of insurance", () => {
+  const system = documentRequest("test-model", document).messages[0].content
+    .replace(/\s+/g, " ");
+  assertEquals(
+    system.includes(
+      "A bill for medical care is medical even when it is addressed to an insurer",
+    ),
+    true,
+  );
+  assertEquals(system.includes("medical ones"), true);
 });
 
 Deno.test("the model's answer picks the document category", async () => {

@@ -3,3 +3,5 @@ src/generated/prisma
 
 prisma/seed.json
 debug/
+
+.metrics/

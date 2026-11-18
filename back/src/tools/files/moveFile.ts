@@ -1,11 +1,12 @@
 import type { Tool, ToolContext } from "@/tools/tool.ts";
 import { nextcloud } from "@/files/nextcloud.ts";
 import { normalizePath } from "@/files/paths.ts";
+import { moveLedgerPaths, syncLedger } from "@/mail/ledger.ts";
 
 export class MoveFileTool implements Tool {
   name = "move_file";
   description =
-    "Move or rename a file or folder in your Nextcloud. Missing parent folders at the destination are created. Refuses to overwrite something that already exists.";
+    "Move or rename a file or folder in your Nextcloud. Missing parent folders at the destination are created. Refuses to overwrite something that already exists. A document filed from an email has its mail ledger entry moved with it.";
   arguments = { from: "string", to: "string" };
   argumentDescriptions = {
     from: 'Current path, e.g. "Downloads/report.pdf".',
@@ -37,6 +38,10 @@ export class MoveFileTool implements Tool {
     }
 
     await dav.moveFile(from, to);
-    return `Moved "${from}" to "${to}".`;
+    const ledger = await syncLedger(
+      () => moveLedgerPaths(from, to),
+      "updated",
+    );
+    return `Moved "${from}" to "${to}".${ledger}`;
   }
 }

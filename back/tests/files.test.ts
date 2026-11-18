@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { normalizeFolder, normalizePath } from "@/files/paths.ts";
-import { readLimit } from "@/tools/readFile.ts";
+import { readLimit } from "@/tools/files/readFile.ts";
 import {
   entryPath,
   formatDate,

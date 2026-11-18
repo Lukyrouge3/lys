@@ -2,11 +2,12 @@ import type { Tool, ToolContext } from "@/tools/tool.ts";
 import { nextcloud } from "@/files/nextcloud.ts";
 import { normalizePath } from "@/files/paths.ts";
 import type { DavEntry } from "@/files/format.ts";
+import { deleteLedgerPaths, syncLedger } from "@/mail/ledger.ts";
 
 export class DeleteFileTool implements Tool {
   name = "delete_file";
   description =
-    "Delete a file from your Nextcloud, or a folder when recursive is true. Deleting is permanent and needs the user's approval. Prefer moving a file somewhere safe if you are unsure.";
+    "Delete a file from your Nextcloud, or a folder when recursive is true. Deleting is permanent and needs the user's approval. Prefer moving a file somewhere safe if you are unsure. Documents filed from an email also lose their mail ledger entry.";
   arguments = { path: "string", recursive: "boolean" };
   argumentDescriptions = {
     path: 'Path to delete, e.g. "Downloads/old.pdf".',
@@ -36,6 +37,10 @@ export class DeleteFileTool implements Tool {
     }
 
     await dav.deleteFile(path);
-    return `Deleted "${path}".`;
+    const ledger = await syncLedger(
+      () => deleteLedgerPaths(path),
+      "removed",
+    );
+    return `Deleted "${path}".${ledger}`;
   }
 }

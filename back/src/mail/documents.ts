@@ -4,7 +4,8 @@ import { classifyDocument } from "@/mail/classify.ts";
 import type { MailAttachment, MailEvent } from "@/mail/watcher.ts";
 import { logger } from "@/utils/logger.ts";
 
-const ROOT = Deno.env.get("MAIL_DOCUMENTS_FOLDER") ?? "Mail";
+export const MAIL_DOCUMENTS_ROOT = Deno.env.get("MAIL_DOCUMENTS_FOLDER") ??
+  "Mail";
 const MAX_NAME_CHARS = 60;
 
 const EXTENSIONS: Record<string, string> = {
@@ -72,7 +73,9 @@ export function documentPath(
   const sender = sanitizeName(senderLabel(mail.from), 30);
   const title = sanitizeName(baseName(attachment.filename), 70);
   const ext = extension(attachment.filename, attachment.mime);
-  return `${ROOT}/${date.slice(0, 4)}/${sanitizeName(category, 20)}/` +
+  return `${MAIL_DOCUMENTS_ROOT}/${date.slice(0, 4)}/${
+    sanitizeName(category, 20)
+  }/` +
     `${date} ${sender} - ${title}${suffix}.${ext}`;
 }
 

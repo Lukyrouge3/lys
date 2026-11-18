@@ -12,7 +12,7 @@ import { logger } from "@/utils/logger.ts";
 
 const RECONNECT_MS = 30_000;
 const FOLDER = "INBOX";
-const PREVIEW_CHARS = 800;
+const PREVIEW_CHARS = 2000;
 
 export type MailEvent = {
   accountId: string;
@@ -72,6 +72,47 @@ export type MailHandler = (
   attachments: MailAttachment[],
 ) => void | Promise<void>;
 
+/** Start of a quoted reply or forward: everything below is not new text. */
+const QUOTE_START = [
+  /^-{2,}\s*(message original|original message|message d'origine|forwarded message|message transféré)\s*-{2,}$/i,
+  /^_{5,}$/,
+  /^on\s.+\bwrote\s*:$/i,
+  /^le\s.+\ba écrit\s*:$/i,
+  /^--\s*$/,
+];
+
+/** Header block of a forwarded mail, skipped when the forward has no text. */
+const QUOTE_HEADER =
+  /^(sujet|subject|date|de|from|répondre à|reply-to|pour|to|envoyé|sent|cc)\s*:/i;
+
+/**
+ * The part of a body worth reading: the new text first, and when a forward
+ * carries none, the quoted message with its header block removed. Line
+ * structure is kept so notices and prompts get paragraphs, not one long line.
+ */
+export function cleanPreview(text: string, limit = PREVIEW_CHARS): string {
+  const lines = text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter((line) => !line.startsWith(">"));
+
+  const cut = lines.findIndex((line) =>
+    QUOTE_START.some((pattern) => pattern.test(line))
+  );
+  let kept = cut === -1 ? lines : lines.slice(0, cut);
+
+  // A bare forward has nothing above the separator: read the quoted mail instead
+  if (cut !== -1 && kept.every((line) => line === "")) {
+    kept = lines.slice(cut + 1);
+    while (kept.length > 0 && (kept[0] === "" || QUOTE_HEADER.test(kept[0]))) {
+      kept.shift();
+    }
+  }
+
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, limit);
+}
+
 /** Body preview plus every real attachment, parsed once per message. */
 export async function parseMail(
   source?: Uint8Array | null,
@@ -95,7 +136,7 @@ export async function parseMail(
       .filter((part) => part.content.byteLength > 0);
 
     return {
-      preview: (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, limit),
+      preview: cleanPreview(parsed.text ?? "", limit),
       attachments,
     };
   } catch {
