@@ -158,6 +158,47 @@ export type Watcher = {
   stop: () => Promise<void>;
 };
 
+/** How a watch ended: the user stopped it, or the connection went away. */
+export type WatchEnd = "aborted" | "closed";
+
+/** The parts of ImapFlow's event API watchEnd needs. */
+type Connection = {
+  on(event: "close" | "error", listener: () => void): unknown;
+  off(event: "close" | "error", listener: () => void): unknown;
+};
+
+/**
+ * Resolves when the connection goes away or the watcher is stopped. imapflow
+ * never reconnects on its own, so a connection that closes must end this watch
+ * and let the reconnect loop in watchMail open a new one. Waiting only on the
+ * abort signal is what used to leave the watcher alive but deaf, with no log.
+ */
+export function watchEnd(
+  connection: Connection,
+  signal: AbortSignal,
+): Promise<WatchEnd> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve("aborted");
+
+    const finish = (end: WatchEnd) => {
+      connection.off("close", onClose);
+      connection.off("error", onClose);
+      signal.removeEventListener("abort", onAbort);
+      resolve(end);
+    };
+    function onClose() {
+      finish("closed");
+    }
+    function onAbort() {
+      finish("aborted");
+    }
+
+    connection.on("close", onClose);
+    connection.on("error", onClose);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export type WatchOptions = {
   account?: string;
   reconnectMs?: number;
@@ -238,9 +279,12 @@ async function watchOnce(
       `Watching ${account.address} (${FOLDER}) for new mail`,
     );
 
-    await untilAborted(signal);
+    const end = await watchEnd(client, signal);
     client.off("exists", schedule);
     await queue;
+    if (end === "closed") {
+      throw new Error(`Mail connection for ${account.name} closed`);
+    }
   } finally {
     await client.logout().catch(() => {});
   }
@@ -324,12 +368,5 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       resolve();
     }
     signal.addEventListener("abort", done, { once: true });
-  });
-}
-
-function untilAborted(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) return resolve();
-    signal.addEventListener("abort", () => resolve(), { once: true });
   });
 }
