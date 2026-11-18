@@ -66,14 +66,24 @@ export async function handleApprovalClick(
   await reply.start();
   try {
     const session = await getSession(channel, ctx.agent, ctx.messageCount);
-    const resolved = await session.resolveApproval(
+    const outcome = await session.resolveApproval(
       toolCallId,
       approved,
       reply,
     );
-    if (!resolved) {
+    if (outcome === "unknown") {
       await interaction.editReply({
         embeds: [embed.setFooter({ text: "Already decided" })],
+      });
+    } else if (outcome === "decided") {
+      // The tool ran, but something was said after its request, so the agent
+      // has nothing to answer right now; the result stays in the history.
+      await interaction.editReply({
+        embeds: [embed.setFooter({
+          text: `${
+            approved ? "✅ Approved" : "❌ Rejected"
+          } · result kept for your next message`,
+        })],
       });
     }
   } finally {

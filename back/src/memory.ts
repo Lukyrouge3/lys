@@ -5,6 +5,7 @@ import {
 } from "@vectorize-io/hindsight-client";
 import prisma from "@/db.ts";
 import { logger } from "@/utils/logger.ts";
+import { expirePendingApprovals, UNDECIDED } from "@/agent/pending.ts";
 
 const BASE_URL = Deno.env.get("HINDSIGHT_BASE_URL");
 const API_KEY = Deno.env.get("HINDSIGHT_API_KEY") || undefined;
@@ -279,9 +280,14 @@ async function doRetain(conversationId: string): Promise<void> {
 
   try {
     // A turn waiting on any approval is not finished, so its messages would be
-    // retained mid-loop. Wait until every decision lets the agent continue.
+    // retained mid-loop. Wait until every decision lets the agent continue, and
+    // let a forgotten button expire instead of blocking this forever.
+    await expirePendingApprovals();
     const pending = await prisma.toolCall.count({
-      where: { approval: "pending", message: { conversationId } },
+      where: {
+        approval: { in: [...UNDECIDED] },
+        message: { conversationId },
+      },
     });
     if (pending > 0) return;
 

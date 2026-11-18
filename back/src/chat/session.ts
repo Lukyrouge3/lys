@@ -45,6 +45,12 @@ export type ChatSessionOptions = {
   messageCount?: number;
 };
 
+/**
+ * What a button click did: ran the tool and continued the turn, ran it but the
+ * conversation had moved on, or matched nothing (already decided).
+ */
+export type ApprovalOutcome = "resumed" | "decided" | "unknown";
+
 export async function createChatSession(
   agentName: string,
   { trigger, messageCount }: ChatSessionOptions,
@@ -70,7 +76,7 @@ export type ChatSession = {
     toolCallId: string,
     approved: boolean,
     adapter: ChatAdapter,
-  ) => Promise<boolean>;
+  ) => Promise<ApprovalOutcome>;
 };
 
 export async function getChatSession(
@@ -149,7 +155,7 @@ export async function getChatSession(
       toolCallId: string,
       approved: boolean,
       adapter: ChatAdapter,
-    ) {
+    ): Promise<ApprovalOutcome> {
       const emit = emitTo(adapter);
       const call = await resolveApproval(
         toolCallId,
@@ -158,7 +164,7 @@ export async function getChatSession(
         emit,
         adapter.sendFile?.bind(adapter),
       );
-      if (!call) return false;
+      if (!call) return "unknown";
 
       // The cached history still has "waiting for approval" as the result
       for (const msg of messages) {
@@ -168,19 +174,20 @@ export async function getChatSession(
       }
       // No new user message: the model just reacts to the outcome
       try {
-        if (await canResume(call, messages)) {
+        if (await canResume(call, conversation.id)) {
           await run(
             emit,
             "approval",
             turnMemory,
             adapter.sendFile?.bind(adapter),
           );
+          return "resumed";
         }
+        return "decided";
       } finally {
         // The turn only really ends once the agent stops after the decision
         void retainConversation(conversation.id);
       }
-      return true;
     },
   };
 }

@@ -138,8 +138,12 @@ model ToolCall {
 
 enum ApprovalStatus {
   pending
+  // Claimed by whoever will run it; a crash here stays visible
+  executing
   approved
   denied
+  // The run started and its outcome is unknown
+  failed
 }
 
 model MailAccount {

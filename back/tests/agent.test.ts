@@ -419,7 +419,7 @@ Deno.test({
 
     await t.step("resumes once the pending call is decided", async () => {
       const { call, conversationId, messages } = await pendingCall();
-      assertEquals(await canResume(call, messages), false);
+      assertEquals(await canResume(call, conversationId), false);
       const resolved = await resolveApproval(
         call.id,
         conversationId,
@@ -428,7 +428,7 @@ Deno.test({
         undefined,
         tools,
       );
-      assertEquals(await canResume(resolved!, messages), true);
+      assertEquals(await canResume(resolved!, conversationId), true);
     });
 
     await t.step(
@@ -472,7 +472,7 @@ Deno.test({
           undefined,
           tools,
         );
-        assertEquals(await canResume(one!, messages), false);
+        assertEquals(await canResume(one!, conversationId), false);
         const two = await resolveApproval(
           second.id,
           conversationId,
@@ -481,18 +481,18 @@ Deno.test({
           undefined,
           tools,
         );
-        assertEquals(await canResume(two!, messages), true);
+        assertEquals(await canResume(two!, conversationId), true);
       },
     );
 
     await t.step(
       "doesn't resume if the conversation moved on",
       async () => {
-        const { call, conversationId, messages } = await pendingCall();
-        messages.push(
-          { role: "user", content: "never mind" },
-          { role: "assistant", content: "ok" },
-        );
+        const { call, conversationId } = await pendingCall();
+        // Persisted, like a real message: the resume rule reads the database
+        await prisma.message.create({
+          data: { conversationId, role: "user", content: "never mind" },
+        });
         const resolved = await resolveApproval(
           call.id,
           conversationId,
@@ -501,7 +501,7 @@ Deno.test({
           undefined,
           tools,
         );
-        assertEquals(await canResume(resolved!, messages), false);
+        assertEquals(await canResume(resolved!, conversationId), false);
       },
     );
 
