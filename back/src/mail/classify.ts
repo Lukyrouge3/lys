@@ -102,7 +102,7 @@ export function classifyRequest(model: string, mail: MailEvent): ChatRequest {
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: classifyPrompt(mail) },
     ],
-    max_tokens: 16,
+    max_tokens: 512,
     temperature: 0,
   };
 }
@@ -136,7 +136,7 @@ export function documentRequest(
       { role: "system", content: DOCUMENT_PROMPT },
       { role: "user", content: documentPrompt(input) },
     ],
-    max_tokens: 16,
+    max_tokens: 512,
     temperature: 0,
   };
 }

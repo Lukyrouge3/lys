@@ -1,4 +1,10 @@
-import { Client, Events, GatewayIntentBits, Message } from "discord.js";
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  Message,
+  MessageFlags,
+} from "discord.js";
 import { logger } from "@/utils/logger.ts";
 import { getAgent } from "@/config/agentConfig.ts";
 import { getSession } from "@/chat/discord/session.ts";
@@ -76,7 +82,7 @@ export async function discordChat(
       if (interaction.isRepliable()) {
         interaction.reply({
           content: "Something went wrong, check the logs.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }).catch(() => {});
       }
     });

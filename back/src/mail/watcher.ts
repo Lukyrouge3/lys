@@ -5,6 +5,7 @@ import {
   getMailAccount,
   type MailAccountWithSecret,
   openImap,
+  WATCH_IDLE_DELAY_MS,
 } from "@/mail/account.ts";
 import { uidWindow } from "@/mail/state.ts";
 import { logger } from "@/utils/logger.ts";
@@ -164,35 +165,41 @@ async function watchOnce(
     return;
   }
 
-  const client = await openImap(account);
+  const client = await openImap(account, {
+    autoIdleDelay: WATCH_IDLE_DELAY_MS,
+  });
   client.on(
     "error",
     (err) => logger.warn(`Mail connection for ${account.name}: ${err.message}`),
   );
 
   try {
-    const lock = await client.getMailboxLock(FOLDER);
-    try {
-      // Sweeps are queued so two bursts of new mail never fetch twice
-      let queue: Promise<void> = Promise.resolve();
-      const schedule = () => {
-        queue = queue.then(() => sweep(client, account, onMail)).catch((err) =>
-          logger.warn(`Mail sweep for ${account.name} failed: ${err}`)
-        );
-      };
+    // Selected but not locked. imapflow's auto-IDLE refuses to arm while a
+    // mailbox lock is held, and a connection that never idles is never told by
+    // the server that mail arrived. The lock lives inside sweep() instead.
+    await client.mailboxOpen(FOLDER);
 
-      await sweep(client, account, onMail);
-      client.on("exists", schedule);
-      logger.info(
-        `Watching ${account.address} (${FOLDER}) for new mail`,
+    // Sweeps are queued so two bursts of new mail never fetch twice
+    let queue: Promise<void> = Promise.resolve();
+    const schedule = () => {
+      queue = queue.then(() => sweep(client, account, onMail)).catch((err) =>
+        logger.warn(`Mail sweep for ${account.name} failed: ${err}`)
       );
+    };
 
-      await untilAborted(signal);
-      client.off("exists", schedule);
-      await queue;
-    } finally {
-      lock.release();
-    }
+    // Registered before the first sweep: mail arriving while the catch-up runs
+    // still schedules a follow-up. Sweeps take the mailbox lock, so the
+    // follow-up cannot overlap the catch-up in flight.
+    client.on("exists", schedule);
+
+    await sweep(client, account, onMail);
+    logger.info(
+      `Watching ${account.address} (${FOLDER}) for new mail`,
+    );
+
+    await untilAborted(signal);
+    client.off("exists", schedule);
+    await queue;
   } finally {
     await client.logout().catch(() => {});
   }
@@ -203,52 +210,67 @@ async function sweep(
   account: MailAccountWithSecret,
   onMail: MailHandler,
 ): Promise<void> {
-  const box = client.mailbox;
-  if (!box) return;
+  // Locked only for the sweep, never for the life of the connection: auto-IDLE
+  // will not arm while a lock is held, and then the server has no session to
+  // push EXISTS to.
+  const lock = await client.getMailboxLock(FOLDER);
+  try {
+    // A pushed EXISTS carries no UIDs, and mailbox.uidNext is only refreshed by
+    // SELECT/STATUS - it does not move on its own. Without this the window
+    // below is computed from the uidNext of the last SELECT and comes out
+    // empty, so pushed mail would never be fetched.
+    const status = await client.status(FOLDER, { uidNext: true });
+    if (!status) throw new Error(`Could not read ${FOLDER} status`);
 
-  const state = await prisma.mailFolder.findUnique({
-    where: { accountId_path: { accountId: account.id, path: FOLDER } },
-  });
-  const { firstUid } = uidWindow(
-    { uidValidity: state?.uidValidity ?? null, lastUid: state?.lastUid ?? 0 },
-    { uidValidity: box.uidValidity, uidNext: box.uidNext },
-  );
+    const box = client.mailbox;
+    if (!box) return;
 
-  const range = uidRange(firstUid, box.uidNext);
-  let highest = Math.max(state?.lastUid ?? 0, box.uidNext - 1);
+    const state = await prisma.mailFolder.findUnique({
+      where: { accountId_path: { accountId: account.id, path: FOLDER } },
+    });
+    const { firstUid } = uidWindow(
+      { uidValidity: state?.uidValidity ?? null, lastUid: state?.lastUid ?? 0 },
+      { uidValidity: box.uidValidity, uidNext: box.uidNext },
+    );
 
-  if (range) {
-    for await (
-      const msg of client.fetch(range, {
-        uid: true,
-        envelope: true,
-        source: true,
-      }, { uid: true })
-    ) {
-      highest = Math.max(highest, msg.uid);
-      try {
-        const { preview, attachments } = await parseMail(msg.source);
-        await onMail(
-          toMailEvent(account, FOLDER, msg, preview),
-          attachments,
-        );
-      } catch (err) {
-        // One bad message must not stop the folder
-        logger.warn(`Handling mail ${msg.uid} failed: ${err}`);
+    const range = uidRange(firstUid, box.uidNext);
+    let highest = Math.max(state?.lastUid ?? 0, box.uidNext - 1);
+
+    if (range) {
+      for await (
+        const msg of client.fetch(range, {
+          uid: true,
+          envelope: true,
+          source: true,
+        }, { uid: true })
+      ) {
+        highest = Math.max(highest, msg.uid);
+        try {
+          const { preview, attachments } = await parseMail(msg.source);
+          await onMail(
+            toMailEvent(account, FOLDER, msg, preview),
+            attachments,
+          );
+        } catch (err) {
+          // One bad message must not stop the folder
+          logger.warn(`Handling mail ${msg.uid} failed: ${err}`);
+        }
       }
     }
-  }
 
-  await prisma.mailFolder.upsert({
-    where: { accountId_path: { accountId: account.id, path: FOLDER } },
-    update: { uidValidity: box.uidValidity, lastUid: highest },
-    create: {
-      accountId: account.id,
-      path: FOLDER,
-      uidValidity: box.uidValidity,
-      lastUid: highest,
-    },
-  });
+    await prisma.mailFolder.upsert({
+      where: { accountId_path: { accountId: account.id, path: FOLDER } },
+      update: { uidValidity: box.uidValidity, lastUid: highest },
+      create: {
+        accountId: account.id,
+        path: FOLDER,
+        uidValidity: box.uidValidity,
+        lastUid: highest,
+      },
+    });
+  } finally {
+    lock.release();
+  }
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
