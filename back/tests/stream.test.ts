@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   addToolCallDeltas,
   generateStreamRequest,
@@ -86,6 +86,20 @@ Deno.test("calls the provider never finished are dropped", () => {
   assertEquals(usableToolCalls(incomplete), [
     { id: "a", name: "first", arguments: "{}" },
   ]);
+});
+
+Deno.test("a window too small for the prompt is refused", () => {
+  const cramped: AgentConfig = {
+    ...agentConfig,
+    contextWindow: 2048,
+    systemPrompt: "x".repeat(4000),
+  };
+
+  assertThrows(
+    () => generateStreamRequest(cramped, [], [{ role: "user", content: "hi" }]),
+    Error,
+    "too small",
+  );
 });
 
 Deno.test("request starts with the system prompt", () => {

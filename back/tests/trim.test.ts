@@ -1,6 +1,6 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import OpenAI from "@openai/openai";
-import { estimateTokens, trimHistory } from "@/llm/trim.ts";
+import { estimateTokens, trimHistory, TRUNCATED } from "@/llm/trim.ts";
 
 type ModelMessage = OpenAI.Chat.ChatCompletionMessageParam;
 
@@ -53,7 +53,37 @@ Deno.test("history never starts with an orphan tool result or assistant", () => 
   assertEquals(trimHistory(messages, 10_000), [user("hi"), assistant("yo")]);
 });
 
-Deno.test("the last message is kept even if it's over budget", () => {
-  const big = user("z".repeat(1000));
-  assertEquals(trimHistory([user("old"), big], 1), [big]);
+Deno.test("the last message is kept, cut down to the budget", () => {
+  const big = user("z".repeat(10_000));
+
+  const result = trimHistory([user("old"), big], 100);
+
+  assertEquals(result.length, 1);
+  assert(estimateTokens(result) <= 100);
+  assert((result[0].content as string).endsWith(TRUNCATED.trim()));
+});
+
+Deno.test("the longest message gives up its content first", () => {
+  const messages = [
+    user("what's in the log?"),
+    toolCall,
+    { ...toolResult, content: "y".repeat(5000) },
+  ];
+  const budget = estimateTokens(messages) - 500;
+
+  const result = trimHistory(messages, budget);
+
+  // Dropping the pair is not possible - it is the last group - so its result
+  // is what gets cut, and the call and its result stay together.
+  assertEquals(result.map((message) => message.role), ["assistant", "tool"]);
+  assert(estimateTokens(result) <= budget);
+  assert((result[1].content as string).length < 5000);
+});
+
+Deno.test("trimming does not eat the caller's history", () => {
+  const messages = [user("keep me ".repeat(2000))];
+
+  trimHistory(messages, 50);
+
+  assertEquals((messages[0].content as string).length, 16_000);
 });

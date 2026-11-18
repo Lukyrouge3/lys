@@ -30,6 +30,15 @@ export function generateStreamRequest(
 
   const budget = contextWindow - maxReplyTokens - estimateTokens(system) -
     estimateTokens(tools);
+  if (budget <= 0) {
+    throw new Error(
+      `Context window ${contextWindow} is too small: the system prompt and ` +
+        `${tools.length} tool schemas take about ${
+          estimateTokens(system) + estimateTokens(tools)
+        } tokens, and the reply needs ${maxReplyTokens}. Raise the agent's ` +
+        `contextWindow or lower maxReplyTokens.`,
+    );
+  }
 
   const request = {
     model: agentConfig.model,
