@@ -8,3 +8,7 @@ cliproxy/config.yaml
 
 # Personal notes stay on this machine only
 notes/
+
+# Agent instructions are local tooling, not part of the project
+AGENT.md
+CLAUDE.md
