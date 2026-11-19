@@ -15,11 +15,11 @@ export function startMailNotifications(client: Client) {
       await storeAttachments(mail, attachments);
     }
 
-    const importance = await classifyMail(mail);
+    const verdict = await classifyMail(mail);
     logger.debug(
-      `Mail ${mail.uid} from ${mail.from} classified as ${importance}`,
+      `Mail ${mail.uid} from ${mail.from} classified as ${verdict.importance}: ${verdict.topic}`,
     );
-    if (importance !== "important") return;
-    await dmOwner(client, formatMailNotice(mail));
+    if (verdict.importance !== "important") return;
+    await dmOwner(client, formatMailNotice(mail, verdict.topic));
   });
 }

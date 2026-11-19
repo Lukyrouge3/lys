@@ -11,10 +11,14 @@ export type Importance = "important" | "normal" | "noise";
 const SYSTEM_PROMPT =
   `You sort incoming mail for one person who only wants to be interrupted when it matters.
 
-Answer with exactly one word:
+Answer with two lines and nothing else.
+
+Line 1 is exactly one word:
 - important: personal mail from a real person, work, money, bills, invitations, deadlines, anything that needs a reply or an action soon, or time-sensitive news.
 - normal: legitimate mail that can wait: receipts, confirmations, account notices, updates to things they use.
 - noise: newsletters, marketing, promotions, automated notifications, social media, spam.
+
+Line 2 says what an important mail is about, as a short noun phrase of at most twelve words: the thing itself, not the greeting, no sender name, no full stop. It is read in one glance to decide whether to stop what one is doing, so for a bill it names the amount and the due date, for an invitation the event and the day. Leave line 2 empty for normal and noise.
 
 Judge by the content, not only the sender. A message from a real person is never noise, even when it is just a greeting or a thanks. If you cannot tell, answer normal.`;
 
@@ -65,6 +69,31 @@ type ChatRequest = {
 export function parseImportance(answer: string): Importance {
   const match = answer.toLowerCase().match(/\b(important|normal|noise)\b/);
   return (match?.[1] as Importance) ?? "normal";
+}
+
+/** The importance, and for an important mail what it is about. */
+export type MailVerdict = {
+  importance: Importance;
+  topic: string;
+};
+
+const LABEL_LINE = /^(important|normal|noise)\b[\s:.;–—-]*/i;
+
+/**
+ * Reads the two-line answer. A model that puts the label and the topic on one
+ * line is understood too; an answer with no usable line is simply without a
+ * topic, and the notice falls back to the subject.
+ */
+export function parseVerdict(answer: string): MailVerdict {
+  const lines = answer.split("\n").map((line) => line.trim()).filter(Boolean);
+  const labelled = lines.find((line) => LABEL_LINE.test(line));
+  const rest = labelled ? labelled.replace(LABEL_LINE, "") : "";
+  const others = labelled ? lines.filter((line) => line !== labelled) : [];
+
+  return {
+    importance: parseImportance(answer),
+    topic: [rest, ...others].filter(Boolean).join(" ").replace(/[.!?\s]+$/, ""),
+  };
 }
 
 const PLURALS: Record<string, DocumentCategory> = {
@@ -144,8 +173,7 @@ export function documentRequest(
   };
 }
 
-export type Classification = {
-  importance: Importance;
+export type Classification = MailVerdict & {
   inputTokens?: number;
   outputTokens?: number;
 };
@@ -162,7 +190,7 @@ export async function classifyWith(
     ) as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
   );
   return {
-    importance: parseImportance(response.choices[0]?.message?.content ?? ""),
+    ...parseVerdict(response.choices[0]?.message?.content ?? ""),
     inputTokens: response.usage?.prompt_tokens,
     outputTokens: response.usage?.completion_tokens,
   };
@@ -228,16 +256,16 @@ async function askAgent<T>(
   }
 }
 
-/** Fail-open: a broken classifier means "normal", never a missed important mail. */
-export async function classifyMail(mail: MailEvent): Promise<Importance> {
+/** Fail-open: a broken classifier means "normal", never an alarm about noise. */
+export async function classifyMail(mail: MailEvent): Promise<MailVerdict> {
   try {
     return await askAgent(
       "mail:classify",
       (model) => classifyRequest(model, mail),
-      parseImportance,
+      parseVerdict,
     );
   } catch {
-    return "normal";
+    return { importance: "normal", topic: "" };
   }
 }
 

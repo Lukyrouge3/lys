@@ -1,7 +1,7 @@
 import type { Client } from "discord.js";
 import type { MailEvent } from "@/mail/watcher.ts";
 
-const NOTICE_CHARS = 1000;
+const NOTICE_CHARS = 200;
 
 /** Discord reads "Name <address>" as masked content, so a notice shows the name only. */
 export function senderName(from: string): string {
@@ -19,10 +19,19 @@ export function cutNotice(text: string, limit = NOTICE_CHARS): string {
   return `${cut.trimEnd()}…`;
 }
 
-export function formatMailNotice(mail: MailEvent): string {
-  const lines = [`📬 ${senderName(mail.from)}: ${mail.subject}`];
-  if (mail.preview) lines.push(cutNotice(mail.preview));
-  return lines.join("\n");
+/**
+ * A nudge, not a copy of the mail: what it is about, who sent it, and that it
+ * wants attention. The subject stands in when the classifier named no topic.
+ */
+export function formatMailNotice(mail: MailEvent, topic = ""): string {
+  const about = cutNotice(topic.trim() || mail.subject, NOTICE_CHARS).replace(
+    /[.!?\s]+$/,
+    "",
+  );
+  const what = about ? ` about ${about}` : "";
+  return `📬 There is an important mail${what} from ${
+    senderName(mail.from)
+  } requiring your attention!`;
 }
 
 export async function dmOwner(client: Client, content: string): Promise<void> {

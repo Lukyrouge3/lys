@@ -3,11 +3,13 @@ import OpenAI from "@openai/openai";
 import {
   classifyDocumentWith,
   classifyPrompt,
+  classifyRequest,
   classifyWith,
   documentPrompt,
   documentRequest,
   parseCategory,
   parseImportance,
+  parseVerdict,
 } from "@/mail/classify.ts";
 import type { MailEvent } from "@/mail/watcher.ts";
 
@@ -56,6 +58,46 @@ Deno.test("an unusable answer defaults to normal", () => {
   assertEquals(parseImportance("44"), "normal");
 });
 
+Deno.test("a two-line answer carries both the label and the topic", () => {
+  assertEquals(
+    parseVerdict("important\nlunch on Friday\n"),
+    { importance: "important", topic: "lunch on Friday" },
+  );
+});
+
+Deno.test("a label and topic on one line still split", () => {
+  assertEquals(
+    parseVerdict("important: lunch on Friday"),
+    { importance: "important", topic: "lunch on Friday" },
+  );
+});
+
+Deno.test("a topic is kept without its final stop", () => {
+  assertEquals(
+    parseVerdict("IMPORTANT\nlunch on Friday.").topic,
+    "lunch on Friday",
+  );
+});
+
+Deno.test("an unimportant mail carries no topic", () => {
+  assertEquals(parseVerdict("noise"), { importance: "noise", topic: "" });
+});
+
+Deno.test("an unusable answer carries no topic", () => {
+  assertEquals(parseVerdict(""), { importance: "normal", topic: "" });
+  assertEquals(parseVerdict("no idea"), { importance: "normal", topic: "" });
+});
+
+Deno.test("the classifier is asked for a topic behind its label", () => {
+  const system = classifyRequest("test-model", mail).messages[0].content
+    .replace(/\s+/g, " ");
+  assertEquals(system.includes("Answer with two lines"), true);
+  assertEquals(
+    system.includes("Leave line 2 empty for normal and noise"),
+    true,
+  );
+});
+
 Deno.test("the prompt carries sender, subject, date and body", () => {
   const prompt = classifyPrompt(mail);
   assertEquals(prompt.includes("From: Ana <ana@example.com>"), true);
@@ -76,11 +118,14 @@ Deno.test("an empty body is stated explicitly", () => {
   );
 });
 
-Deno.test("the model's answer decides the importance and usage is kept", async () => {
-  const { openai, requests } = fakeOpenAI("important");
+Deno.test("the model's answer decides the importance, the topic and usage", async () => {
+  const { openai, requests } = fakeOpenAI(
+    "important\nlunch on Friday",
+  );
   const result = await classifyWith(openai, "test-model", mail);
 
   assertEquals(result.importance, "important");
+  assertEquals(result.topic, "lunch on Friday");
   assertEquals(result.inputTokens, 11);
   assertEquals(requests.length, 1);
 });

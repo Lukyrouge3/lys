@@ -17,18 +17,37 @@ const mail: MailEvent = {
   preview: "Are you free at 13:00?",
 };
 
-Deno.test("a notice shows sender, subject and a short body", () => {
+Deno.test("a notice says what the mail is about and who sent it", () => {
   assertEquals(
-    formatMailNotice(mail),
-    "📬 Ana: Lunch?\nAre you free at 13:00?",
+    formatMailNotice(mail, "lunch on Friday"),
+    "📬 There is an important mail about lunch on Friday from Ana requiring your attention!",
   );
 });
 
-Deno.test("a notice without a body stays one line", () => {
+Deno.test("a notice never repeats the body of the mail", () => {
+  const notice = formatMailNotice(mail, "lunch on Friday");
+  assertEquals(notice.includes(mail.preview), false);
+});
+
+Deno.test("a topic with a full stop does not get a double stop", () => {
   assertEquals(
-    formatMailNotice({ ...mail, preview: "" }),
-    "📬 Ana: Lunch?",
+    formatMailNotice(mail, "lunch on Friday."),
+    "📬 There is an important mail about lunch on Friday from Ana requiring your attention!",
   );
+});
+
+Deno.test("without a topic the subject stands in", () => {
+  assertEquals(
+    formatMailNotice(mail),
+    "📬 There is an important mail about Lunch from Ana requiring your attention!",
+  );
+});
+
+Deno.test("a long topic is cut on a word, not in the middle of one", () => {
+  const notice = formatMailNotice(mail, "mot ".repeat(500));
+  const topic = notice.split(" about ")[1].split(" from ")[0];
+  assertEquals(topic.endsWith("mot…"), true);
+  assertEquals(topic.length, 200);
 });
 
 Deno.test("the address is dropped, Discord would eat the angle brackets", () => {
@@ -43,16 +62,11 @@ Deno.test("an empty sender is unknown", () => {
   assertEquals(senderName(""), "unknown sender");
 });
 
-Deno.test("a long body is cut to the notice limit", () => {
-  const notice = formatMailNotice({ ...mail, preview: "z".repeat(2000) });
-  assertEquals(notice.split("\n")[1].length, 1001); // 1000 chars plus the ellipsis
-});
-
 Deno.test("a cut notice ends on a word, not in the middle of one", () => {
   const body = "mot ".repeat(500);
   const cut = cutNotice(body);
   assertEquals(cut.endsWith("mot…"), true);
-  assertEquals(cut.length, 1000);
+  assertEquals(cut.length, 200);
 });
 
 Deno.test("a body under the limit is kept whole", () => {
