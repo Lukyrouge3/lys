@@ -50,6 +50,11 @@ services:
     # cliproxy). Dev machines running the bot outside docker map those
     # names in /etc/hosts instead.
     env_file: ./back/.env
+    # mail.deneria.net's public record points at the wrong host for
+    # IMAPS; the LAN address is the one that answers. Same as the
+    # hosts entry on dev machines.
+    extra_hosts:
+      - "mail.deneria.net:10.10.10.12"
     restart: unless-stopped
     depends_on:
       postgres:
