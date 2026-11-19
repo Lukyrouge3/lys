@@ -46,11 +46,10 @@ services:
 
   bot:
     build: ./back
-    # Secrets come from back/.env; back/.env.docker overrides only the
-    # URLs that differ inside the compose network (later files win).
-    env_file:
-      - ./back/.env
-      - ./back/.env.docker
+    # back/.env names the stack services directly (postgres, hindsight,
+    # cliproxy). Dev machines running the bot outside docker map those
+    # names in /etc/hosts instead.
+    env_file: ./back/.env
     restart: unless-stopped
     depends_on:
       postgres:
