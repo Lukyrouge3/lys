@@ -4,3 +4,7 @@
 cliproxy/auths/
 cliproxy/logs/
 cliproxy/config.yaml
+.metrics/
+
+# Personal notes stay on this machine only
+notes/
