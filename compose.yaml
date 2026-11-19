@@ -39,6 +39,15 @@ services:
     volumes:
       - hindsight-data:/home/hindsight/.pg0
 
+  bot:
+    build: ./back
+    # The bot reads the same environment as `deno task dev` in back/.
+    env_file: ./back/.env
+    # Runs on the host network so the localhost URLs stored in back/.env
+    # and in the provider table (postgres, cliproxy, hindsight) work as-is.
+    network_mode: host
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   hindsight-data:

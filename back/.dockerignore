@@ -1,0 +1,13 @@
+# Secrets never enter the build context or the image.
+.env
+.env.*
+prisma/seed*.json
+
+# Regenerated from the schema during the build.
+src/generated/prisma
+
+# Local artifacts.
+.git
+debug/
+.metrics/
+node_modules
