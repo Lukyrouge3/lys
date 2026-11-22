@@ -16,7 +16,7 @@ export function parseMarkStatus(value: unknown): JobStatus {
   if (typeof value === "string") {
     const status = value.trim().toLowerCase();
     if ((MARKABLE as string[]).includes(status)) return status as JobStatus;
-    if (status === "preparing" || status === "ready") {
+    if (status === "preparing" || status === "ready" || status === "review") {
       throw new Error(
         `Nothing changed: "${status}" is set by the system, not by hand. Use one of ${ALLOWED}.`,
       );
@@ -43,7 +43,7 @@ export function parseJobRef(value: unknown): string {
 export class MarkJobTool implements Tool {
   name = "mark_job";
   description =
-    'Record what happened to a job the owner queued. Only call it when the owner EXPLICITLY says what happened: they applied, they got an interview, they were rejected, they are not interested and want it dropped, or they want it put back in the queue. Never infer a status from mail, a notification or a guess; ask when unsure. "preparing" and "ready" belong to the system and cannot be set here.';
+    'Record what happened to a job the owner queued. Only call it when the owner EXPLICITLY says what happened: they applied, they got an interview, they were rejected, they are not interested and want it dropped, or they want it put back in the queue. Never infer a status from mail, a notification or a guess; ask when unsure. "preparing", "ready" and "review" belong to the system and cannot be set here.';
   arguments = { job: "string", status: "string" };
   argumentDescriptions = {
     job:

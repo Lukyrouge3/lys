@@ -163,6 +163,8 @@ model MailAccount {
   updatedAt  DateTime     @updatedAt
   folders    MailFolder[]
   documents  MailDocument[]
+  notes      MailNote[]
+  drafts     MailDraft[]
 }
 
 // Tracks how far each folder has been read. UIDs are only comparable while
@@ -203,6 +205,49 @@ model MailDocument {
   @@index([accountId, folder, uid])
 }
 
+// One row per classified mail worth remembering; the morning summary reads it.
+model MailNote {
+  id         String      @id @default(uuid())
+  account    MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId  String
+  folder     String
+  uid        Int
+  from       String
+  subject    String
+  topic      String      @default("")
+  importance String
+  receivedAt DateTime
+  createdAt  DateTime    @default(now())
+
+  @@unique([accountId, folder, uid])
+  @@index([receivedAt])
+}
+
+// Remembers which mail already got a draft.
+model MailDraft {
+  id        String      @id @default(uuid())
+  account   MailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId String
+  folder    String
+  uid       Int
+  subject   String
+  draftedAt DateTime    @default(now())
+
+  @@unique([accountId, folder, uid])
+}
+
+// The daily mail sorting proposal awaiting approval.
+model MailProposal {
+  id        String    @id @default(uuid())
+  createdAt DateTime  @default(now())
+  decidedAt DateTime?
+  // pending | approved | denied | applied | failed
+  status    String    @default("pending")
+  // [{accountId, folder, uid, target, subject, from}]
+  moves     Json
+  summary   String
+}
+
 enum JobStatus {
   queued
   preparing
@@ -211,6 +256,8 @@ enum JobStatus {
   interview
   rejected
   dropped
+  // Needs a human look: the prep quality gate failed
+  review
 }
 
 enum JobRank {
@@ -239,6 +286,12 @@ model Job {
   notifiedAt     DateTime?
   // job.md written to Nextcloud /Postulations/Input
   inboxWrittenAt DateTime?
+  // Nextcloud folder the prepared documents were delivered to
+  prepFolder     String?
+  preparedAt     DateTime?
+  prepAttempts   Int        @default(0)
+  // Why a job is in review, or the gaps list
+  prepNote       String?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 

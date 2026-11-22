@@ -6,6 +6,7 @@ const STATUSES: JobStatus[] = [
   "queued",
   "preparing",
   "ready",
+  "review",
   "applied",
   "interview",
   "rejected",
@@ -88,7 +89,7 @@ export class ListJobsTool implements Tool {
   };
   argumentDescriptions = {
     status:
-      '"queued", "preparing", "ready", "applied", "interview", "rejected", "dropped", or "all". Default: the open statuses (queued, preparing, ready).',
+      '"queued", "preparing", "ready", "review", "applied", "interview", "rejected", "dropped", or "all". Default: the open statuses (queued, preparing, ready).',
     include_skipped: "true also lists jobs ranked skip. Default false.",
     limit: `How many jobs to show, 1-30. Default ${DEFAULT_LIMIT}.`,
   };

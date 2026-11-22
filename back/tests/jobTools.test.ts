@@ -129,6 +129,18 @@ Deno.test({
         assert(output.includes("· rejected"));
       });
 
+      await t.step("the review status can be filtered", async () => {
+        await truncate("Job");
+        await addJob({ title: "needs a look" }, { status: "review" });
+        await addJob({ title: "still queued" });
+
+        const output = await list({ status: "review" });
+        assert(output.includes("needs a look"));
+        assert(output.includes("· review"));
+        assert(!output.includes("still queued"));
+        assertEquals(blocks(output).length, 1);
+      });
+
       await t.step('status "all" covers every status', async () => {
         await truncate("Job");
         await addJob({ title: "open job" });
@@ -258,7 +270,7 @@ Deno.test({
         await truncate("Job");
         const job = await addJob();
 
-        for (const status of ["preparing", "ready", "bogus", ""]) {
+        for (const status of ["preparing", "ready", "review", "bogus", ""]) {
           const result = await runTool(
             "mark_job",
             context,
