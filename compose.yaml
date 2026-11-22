@@ -55,6 +55,14 @@ services:
     # hosts entry on dev machines.
     extra_hosts:
       - "mail.deneria.net:10.10.10.12"
+    # The jobs API (browser extension -> bot) binds every interface INSIDE the
+    # container (JOBS_HOST); the publish rule above keeps the port on the host's
+    # loopback only, so reach it through an SSH tunnel:
+    #   ssh -L 8787:127.0.0.1:8787 user@host
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      JOBS_HOST: "0.0.0.0"
     restart: unless-stopped
     depends_on:
       postgres:

@@ -202,3 +202,46 @@ model MailDocument {
   @@index([receivedAt])
   @@index([accountId, folder, uid])
 }
+
+enum JobStatus {
+  queued
+  preparing
+  ready
+  applied
+  interview
+  rejected
+  dropped
+}
+
+enum JobRank {
+  apply
+  maybe
+  skip
+}
+
+model Job {
+  id             String     @id @default(uuid())
+  // "linkedin"
+  source         String
+  // The site's own job id; dedupe key with source
+  externalId     String
+  url            String
+  title          String
+  company        String
+  location       String?
+  description    String
+  postedAt       DateTime?
+  // Null until ranked, or when ranking failed
+  rank           JobRank?
+  rankReason     String?
+  status         JobStatus  @default(queued)
+  // Discord ping sent
+  notifiedAt     DateTime?
+  // job.md written to Nextcloud /Postulations/Input
+  inboxWrittenAt DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([source, externalId])
+  @@index([status, rank])
+}

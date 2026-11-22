@@ -210,12 +210,15 @@ export async function classifyDocumentWith(
   return parseCategory(response.choices[0]?.message?.content ?? "");
 }
 
-async function askAgent<T>(
+export async function askAgent<T>(
   trigger: string,
   request: (model: string) => ChatRequest,
   parse: (answer: string) => T,
+  agentName?: string,
 ): Promise<T> {
-  const agent = await getAgent(Deno.env.get("MAIL_CLASSIFIER_AGENT") ?? "lys");
+  const agent = await getAgent(
+    agentName ?? Deno.env.get("MAIL_CLASSIFIER_AGENT") ?? "lys",
+  );
   const openai = await getOpenAIClient(agent.provider);
   const payload = request(agent.model);
   const start = performance.now();

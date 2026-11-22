@@ -11,6 +11,8 @@ import { getSession } from "@/chat/discord/session.ts";
 import { DiscordReply } from "@/chat/discord/reply.ts";
 import { handleInteraction } from "@/chat/discord/interaction.ts";
 import { startMailNotifications } from "@/chat/discord/mail.ts";
+import { dmOwner } from "@/chat/discord/notify.ts";
+import { startJobServer } from "@/jobs/server.ts";
 
 export async function discordChat(
   agentName: string,
@@ -91,6 +93,10 @@ export async function discordChat(
   client.once(Events.ClientReady, (ready) => {
     logger.info(`Logged in to Discord as ${ready.user.tag}`);
     startMailNotifications(client);
+    // The extension posts here; the pings go out as DMs like the mail notices
+    startJobServer({ notify: (text) => dmOwner(client, text) }).catch((err) => {
+      logger.error(`Jobs API failed to start: ${err}`);
+    });
   });
 
   await client.login(token);

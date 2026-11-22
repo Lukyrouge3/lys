@@ -1,0 +1,4 @@
+// The candidate description the ranker judges every posting against. Kept in
+// one place so the ranking prompt and future tools agree on the same facts.
+export const JOB_PROFILE: string =
+  "Candidate: junior software developer, native French, fluent English, based in the Geneva area, Switzerland. Internship ends 30 Nov 2026; available from January 2027. About 16 months of working experience (a 9-month internship plus 3 solo client mandates). Strong: TypeScript, SvelteKit, React, Python, FastAPI, C and C++, Rust, Kotlin/Android, Docker, CI/CD. Wants any software engineering job (full-time) in Switzerland or fully remote. Not interested: internships, apprenticeships, non-software roles, senior/lead/staff-only roles. A stated requirement of 3+ years of experience LOWERS the rank but does not disqualify, because such requirements are often soft; 5+ years, or a senior/lead/staff title with no sign that juniors are welcome, is 'skip'.";

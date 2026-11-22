@@ -13,7 +13,8 @@
     "fmt:check": "deno fmt --check",
     "mail:check": "deno run -A --env src/mail/check.ts",
     "mail:watch": "deno run -A --env src/mail/watch.ts",
-    "mail:backfill": "deno run -A --env src/mail/backfill.ts"
+    "mail:backfill": "deno run -A --env src/mail/backfill.ts",
+    "jobs:token": "deno run -A --env src/jobs/token.ts"
   },
   "fmt": {
     "exclude": ["prisma/seed.example.json"]
