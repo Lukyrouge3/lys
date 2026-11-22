@@ -103,20 +103,24 @@ export type InboxOptions = {
   now?: Date;
 };
 
+/** Whether this call put the file there or found one already in place. */
+export type InboxResult = "written" | "exists";
+
 /**
  * Writes one job to `/Postulations/Input`. A file that is already there is the
- * job's record, so this returns without touching it; a failed write throws and
- * the caller retries later.
+ * job's record, so this returns `"exists"` without touching it; a failed write
+ * throws and the caller retries later.
  */
 export async function writeJobToInbox(
   job: Job,
   { dav = nextcloud(), now }: InboxOptions = {},
-): Promise<void> {
+): Promise<InboxResult> {
   const path = jobInboxPath(job);
-  if (await dav.exists(path)) return;
+  if (await dav.exists(path)) return "exists";
 
   const content = new TextEncoder().encode(formatJobMarkdown(job, now));
   // putFile creates the parent folder and refuses to overwrite, so a racing
   // writer still cannot lose an existing file.
   await putFile(path, content, { dav });
+  return "written";
 }

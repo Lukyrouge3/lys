@@ -97,8 +97,9 @@ export function parseRank(
 export async function rankJob(
   job: Pick<Job, "title" | "company" | "location" | "description">,
 ): Promise<{ rank: JobRank; reason: string } | null> {
+  const started = performance.now();
   try {
-    return await askAgent(
+    const result = await askAgent(
       "job:rank",
       (model) => rankRequest(model, job),
       (answer) => {
@@ -114,6 +115,12 @@ export async function rankJob(
       },
       Deno.env.get("JOB_RANKER_AGENT") ?? "lys",
     );
+    // askAgent hands back only the parsed answer, so the token counts stay in
+    // the llmCall row; the round trip is what tells a slow ranker from a fast one
+    logger.info(
+      `jobs: rank call ${Math.round(performance.now() - started)} ms`,
+    );
+    return result;
   } catch (err) {
     logger.warn(`job:rank failed: ${err}`);
     return null;

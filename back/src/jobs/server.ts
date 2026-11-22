@@ -7,6 +7,8 @@ import { processJob } from "@/jobs/process.ts";
 import { loadJobsToken } from "@/jobs/token.ts";
 import type { JobInput } from "@/jobs/store.ts";
 import { saveJob } from "@/jobs/store.ts";
+import { JOB_INBOX_FOLDER } from "@/jobs/inbox.ts";
+import { clip, shortJobId } from "@/jobs/log.ts";
 import { logger } from "@/utils/logger.ts";
 
 /** 200 KB: a full posting with its description, with room to spare. */
@@ -30,7 +32,8 @@ export type JobServerDeps = {
   /** The bearer token `deno task jobs:token` created. */
   token: string;
   save: SaveJob;
-  enqueue: (jobId: string) => void;
+  /** Queues a job and returns how many are now waiting, this one included. */
+  enqueue: (jobId: string) => number;
 };
 
 function json(body: unknown, status: number): Response {
@@ -48,6 +51,7 @@ function text(body: string, status: number): Response {
 }
 
 function badRequest(error: string): Response {
+  logger.warn(`jobs: rejected 400 ${error}`);
   return json({ error }, 400);
 }
 
@@ -207,16 +211,19 @@ export async function handleJobRequest(
     if (req.method !== "POST") return json({ error: "use POST" }, 405);
 
     if (!(await authorized(req.headers.get("authorization"), deps.token))) {
+      logger.warn("jobs: rejected 401 (bad or missing token)");
       return json({ error: "unauthorized" }, 401);
     }
 
     const declared = Number(req.headers.get("content-length") ?? "");
     if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+      logger.warn("jobs: rejected 413");
       return json({ error: "body too large" }, 413);
     }
 
     const body = await req.text();
     if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) {
+      logger.warn("jobs: rejected 413");
       return json({ error: "body too large" }, 413);
     }
 
@@ -231,18 +238,29 @@ export async function handleJobRequest(
     if (!parsed.success) return validationError(parsed.error);
 
     const { job, duplicate } = await deps.save(toInput(parsed.data));
+    const id = shortJobId(job.id);
 
     if (duplicate) {
+      logger.info(
+        `jobs: duplicate ${id} (rank=${job.rank ?? "none"}, pinged=${
+          job.notifiedAt !== null
+        }, inbox=${job.inboxWrittenAt !== null})`,
+      );
       // A re-click retries whatever the earlier run could not finish
-      if (needsProcessing(job)) deps.enqueue(job.id);
+      if (needsProcessing(job)) {
+        const depth = deps.enqueue(job.id);
+        logger.debug(`jobs: queued ${id} (queue depth ${depth})`);
+      }
       return json({ id: job.id, duplicate: true }, 200);
     }
 
-    deps.enqueue(job.id);
+    logger.info(`jobs: received ${id} "${clip(job.title)}" at ${job.company}`);
+    const depth = deps.enqueue(job.id);
+    logger.debug(`jobs: queued ${id} (queue depth ${depth})`);
     return json({ id: job.id, duplicate: false }, 201);
   } catch (err) {
     // A stack trace in the response would only amuse the wrong people
-    logger.error(`Job request failed: ${err}`);
+    logger.error(`jobs: request failed: ${err}`);
     return json({ error: "internal error" }, 500);
   }
 }
@@ -250,12 +268,17 @@ export async function handleJobRequest(
 /** One job at a time, in arrival order; a failure is logged, never thrown. */
 function serialQueue(
   run: (jobId: string) => Promise<void>,
-): (jobId: string) => void {
+): (jobId: string) => number {
   let tail: Promise<void> = Promise.resolve();
+  let pending = 0;
   return (jobId) => {
+    pending += 1;
     tail = tail.then(() => run(jobId)).catch((err) => {
-      logger.error(`Job ${jobId} failed in the queue: ${err}`);
+      logger.error(`jobs: queue ${shortJobId(jobId)} failed: ${err}`);
+    }).finally(() => {
+      pending -= 1;
     });
+    return pending;
   };
 }
 
@@ -273,18 +296,19 @@ export async function startJobServer(
   const token = await loadJobsToken();
   if (!token) {
     logger.warn(
-      "No jobs-api-token secret, the extension cannot post jobs. " +
+      "jobs: no token found, the extension cannot post jobs. " +
         "Run: deno task jobs:token",
     );
     return null;
   }
+  logger.info("jobs: token found, the extension can post jobs");
 
   const hostname = Deno.env.get("JOBS_HOST") ?? "127.0.0.1";
   const port = Deno.env.get("JOBS_PORT")
     ? Number(Deno.env.get("JOBS_PORT"))
     : 8787;
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    logger.error(`JOBS_PORT is not a port number; the jobs API is off`);
+    logger.error(`jobs: JOBS_PORT is not a port number; the jobs API is off`);
     return null;
   }
 
@@ -297,17 +321,18 @@ export async function startJobServer(
       hostname,
       port,
       onListen: ({ hostname, port }) => {
-        logger.info(`Jobs API listening on http://${hostname}:${port}`);
+        logger.info(`jobs: listening on http://${hostname}:${port}`);
+        logger.info(`jobs: inbox folder ${JOB_INBOX_FOLDER}`);
       },
     }, (req) => handleJobRequest(req, { token, save: saveJob, enqueue }));
 
     // A listen failure (port taken) resolves through the server, not a throw
     server.finished.catch((err) => {
-      logger.error(`Jobs API stopped: ${err}`);
+      logger.error(`jobs: api stopped: ${err}`);
     });
     return server;
   } catch (err) {
-    logger.error(`Jobs API could not listen on ${hostname}:${port}: ${err}`);
+    logger.error(`jobs: could not listen on ${hostname}:${port}: ${err}`);
     return null;
   }
 }

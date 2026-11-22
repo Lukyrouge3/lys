@@ -6,6 +6,7 @@
 // never logged again. Rotating invalidates the copy pasted in the extension.
 import prisma from "@/db.ts";
 import { decrypt, encrypt } from "@/utils/aes.ts";
+import { logger } from "@/utils/logger.ts";
 
 export const JOBS_TOKEN_SECRET = "jobs-api-token";
 
@@ -35,6 +36,9 @@ if (import.meta.main) {
   console.log(token);
   console.log(
     "Paste this token into the extension's job options now; it is not shown again.",
+  );
+  logger.info(
+    `jobs: token stored as secret ${JOBS_TOKEN_SECRET}; restart the bot to use it`,
   );
   await prisma.$disconnect();
 }

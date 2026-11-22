@@ -4,7 +4,12 @@
 // ever reaches the queue.
 import type { Job } from "@/generated/prisma/client.ts";
 import { formatJobNotice } from "@/chat/discord/notify.ts";
-import { writeJobToInbox } from "@/jobs/inbox.ts";
+import {
+  type InboxResult,
+  jobInboxPath,
+  writeJobToInbox,
+} from "@/jobs/inbox.ts";
+import { clip, shortJobId } from "@/jobs/log.ts";
 import { rankAndStore } from "@/jobs/rank.ts";
 import { markInboxWritten, markNotified } from "@/jobs/store.ts";
 import { logger } from "@/utils/logger.ts";
@@ -20,7 +25,7 @@ export type ProcessDeps = {
   /** Ranks and stores the job; the real one never throws on a ranking failure. */
   rank: typeof rankAndStore;
   notify: (text: string) => Promise<void>;
-  writeInbox: (job: Job) => Promise<void>;
+  writeInbox: (job: Job) => Promise<InboxResult>;
   /** Overrides INBOX_TIMEOUT_MS so a test does not wait 20 seconds. */
   inboxTimeoutMs: number;
 };
@@ -44,13 +49,27 @@ export async function processJob(
   const writeInbox = deps.writeInbox ?? writeJobToInbox;
   const inboxTimeoutMs = deps.inboxTimeoutMs ?? INBOX_TIMEOUT_MS;
 
+  const id = shortJobId(jobId);
+  const started = performance.now();
+  logger.info(`jobs: processing ${id}`);
+
   let job: Job;
   try {
     job = await rank(jobId);
   } catch (err) {
     // The row is gone or the database is down: nothing else can be done
-    logger.error(`Ranking job ${jobId} failed: ${err}`);
+    logger.error(`jobs: rank failed ${id}: ${err}`);
     return null;
+  }
+
+  if (job.rank === null) {
+    logger.info(`jobs: ranked ${id} -> none (ranker gave no usable answer)`);
+  } else {
+    logger.info(
+      `jobs: ranked ${id} -> ${job.rank} (${
+        clip(job.rankReason ?? "", 140) || "no reason given"
+      })`,
+    );
   }
 
   // A null rank (the ranker failed) gets neither, so a retry can do both
@@ -62,8 +81,9 @@ export async function processJob(
         `Pinging for job ${job.id}`,
       );
       job = await markNotified(job.id);
+      logger.info(`jobs: ping sent ${id}`);
     } catch (err) {
-      logger.warn(`Pinging for job ${jobId} failed: ${err}`);
+      logger.warn(`jobs: ping failed ${id}: ${err}`);
     }
   }
 
@@ -71,18 +91,31 @@ export async function processJob(
     job.rank !== null && job.rank !== "skip" &&
     job.inboxWrittenAt === null
   ) {
+    const path = jobInboxPath(job);
     try {
       // Deadline first: a hung WebDAV write would block every later job
-      await withTimeout(
+      const result = await withTimeout(
         writeInbox(job),
         inboxTimeoutMs,
         `Writing job ${job.id} to the inbox`,
       );
       job = await markInboxWritten(job.id);
+      logger.info(
+        result === "written"
+          ? `jobs: inbox ${id} -> written ${path}`
+          : `jobs: inbox ${id} -> already there ${path}`,
+      );
     } catch (err) {
-      logger.warn(`Writing job ${jobId} to the inbox failed: ${err}`);
+      logger.warn(`jobs: inbox ${id} -> failed: ${err}`);
     }
   }
 
+  logger.info(
+    `jobs: done ${id} in ${Math.round(performance.now() - started)} ms (rank=${
+      job.rank ?? "none"
+    }, pinged=${job.notifiedAt !== null}, inbox=${
+      job.inboxWrittenAt !== null
+    })`,
+  );
   return job;
 }

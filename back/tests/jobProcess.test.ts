@@ -18,7 +18,7 @@ function recorder() {
     },
     writeInbox: (job: Job) => {
       written.push(job);
-      return Promise.resolve();
+      return Promise.resolve("written" as const);
     },
   };
 }
@@ -211,7 +211,7 @@ Deno.test({
             rank: rankAs("apply"),
             notify: calls.notify,
             // Never settles, like WebDAV against an unreachable Nextcloud
-            writeInbox: () => new Promise<void>(() => {}),
+            writeInbox: () => new Promise<never>(() => {}),
             inboxTimeoutMs: 20,
           });
 
