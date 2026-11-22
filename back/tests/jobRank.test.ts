@@ -13,7 +13,7 @@ Deno.test("the request carries the profile and the posting", () => {
   const request = rankRequest("test-model", job);
 
   assertEquals(request.model, "test-model");
-  assertEquals(request.max_tokens, 120);
+  assertEquals(request.max_tokens, 512);
   assertEquals(request.temperature, 0);
 
   const system = request.messages[0].content;
@@ -26,6 +26,11 @@ Deno.test("the request carries the profile and the posting", () => {
   assert(user.includes("Company: Acme"));
   assert(user.includes("Location: Geneva"));
   assert(user.endsWith("TypeScript and SvelteKit."));
+});
+
+Deno.test("the request leaves room for a reasoning model to think", () => {
+  const request = rankRequest("test-model", job);
+  assert(request.max_tokens >= 512);
 });
 
 Deno.test("a missing location is stated, not left blank", () => {

@@ -27,6 +27,7 @@ Judge by what the posting asks for, not by its title alone. A stated "3+ years" 
 
 const MAX_DESCRIPTION_CHARS = 4000;
 const MAX_REASON_CHARS = 140;
+const MAX_LOGGED_ANSWER_CHARS = 80;
 
 export function rankRequest(
   model: string,
@@ -56,7 +57,9 @@ export function rankRequest(
         ].join("\n"),
       },
     ],
-    max_tokens: 120,
+    // A reasoning model spends tokens thinking before it answers; too small a
+    // budget is used up on that and the answer comes back empty.
+    max_tokens: 512,
     temperature: 0,
   };
 }
@@ -95,7 +98,17 @@ export async function rankJob(
     return await askAgent(
       "job:rank",
       (model) => rankRequest(model, job),
-      parseRank,
+      (answer) => {
+        const parsed = parseRank(answer);
+        if (!parsed) {
+          logger.warn(
+            `job:rank gave an unusable answer for "${job.title}": ${
+              JSON.stringify(answer.slice(0, MAX_LOGGED_ANSWER_CHARS))
+            }`,
+          );
+        }
+        return parsed;
+      },
       Deno.env.get("JOB_RANKER_AGENT") ?? "lys",
     );
   } catch (err) {
