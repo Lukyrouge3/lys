@@ -5,6 +5,11 @@
  */
 "use strict";
 
+// Shared pure helpers (toast text, company fallback, response messages).
+importScripts("protocol.js");
+
+const protocol = globalThis.LysProtocol;
+
 const DEFAULT_ENDPOINT = "http://127.0.0.1:8787";
 const REQUEST_TIMEOUT_MS = 10000;
 
@@ -67,7 +72,7 @@ function sanitizeJob(job) {
   const externalId = cleanString(job.externalId, 100);
   const url = cleanString(job.url, 2000);
   const title = cleanString(job.title, 500);
-  const company = cleanString(job.company, 500);
+  const company = protocol.companyForJob(cleanString(job.company, 500));
   const location = job.location == null
     ? null
     : cleanString(job.location, 500) || null;
@@ -150,6 +155,7 @@ async function handleSend(job) {
       ok: false,
       status: response.status,
       error: "http",
+      message: protocol.responseErrorMessage(data),
     };
   } catch (error) {
     if (error && error.name === "AbortError") {

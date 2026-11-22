@@ -1,4 +1,5 @@
 import "./extract.js";
+import "./protocol.js";
 
 const {
   JOB_DESCRIPTION_HEADINGS,
@@ -10,6 +11,21 @@ const {
   parseDocumentTitle,
   extractJobFromDocument,
 } = globalThis.LysExtract;
+
+const {
+  UNKNOWN_COMPANY,
+  MAX_ERROR_MESSAGE_LENGTH,
+  TOAST_CONFIG,
+  TOAST_STALE_CONTEXT,
+  TOAST_TOKEN,
+  TOAST_UNEXPECTED,
+  TOAST_UNREACHABLE,
+  responseErrorMessage,
+  companyForJob,
+  isStaleContextError,
+  sendErrorToast,
+  sendFailureToast,
+} = globalThis.LysProtocol;
 
 const test = typeof Deno !== "undefined"
   ? Deno.test
@@ -684,5 +700,153 @@ test("a page-sized description container is cut to the 20000 character cap", () 
   assertTrue(
     result.job.description.length > 19000,
     "description is not silently empty",
+  );
+});
+
+// --- Toast text for failed sends (protocol.js) ---------------------------
+// The jobs API answers errors as `{"error":"<message>"}`; these tests pin the
+// exact wording so a wrong token is never confused with a rejected job body.
+
+test("401 says the token was rejected, not that the job was bad", () => {
+  assertEqual(
+    sendFailureToast({
+      ok: false,
+      status: 401,
+      error: "http",
+      message: "unauthorized",
+    }),
+    TOAST_TOKEN,
+    "401 explains the token",
+  );
+  assertIncludes(TOAST_TOKEN, "rejected the token", "401 names the token");
+});
+
+test("400 reports the server's own complaint about the job body", () => {
+  assertEqual(
+    sendFailureToast({
+      ok: false,
+      status: 400,
+      error: "http",
+      message: "company: is required",
+    }),
+    "Lys rejected the job: company: is required",
+    "400 passes the server message through",
+  );
+});
+
+test("400 without a message still says the job was rejected", () => {
+  for (
+    const response of [
+      { ok: false, status: 400, error: "http", message: "" },
+      { ok: false, status: 400, error: "http" },
+      { ok: false, status: 400, error: "http", message: "   " },
+    ]
+  ) {
+    assertEqual(
+      sendFailureToast(response),
+      "Lys rejected the job.",
+      "empty server message falls back to a short toast",
+    );
+  }
+});
+
+test("config errors point at the extension options", () => {
+  assertEqual(
+    sendFailureToast({ ok: false, status: 0, error: "config" }),
+    TOAST_CONFIG,
+    "config toast",
+  );
+});
+
+test("network and timeout are the only not-reachable toasts", () => {
+  assertEqual(
+    sendFailureToast({ ok: false, status: 0, error: "network" }),
+    TOAST_UNREACHABLE,
+    "network toast",
+  );
+  assertEqual(
+    sendFailureToast({ ok: false, status: 0, error: "timeout" }),
+    TOAST_UNREACHABLE,
+    "timeout toast",
+  );
+  assertEqual(
+    sendFailureToast({
+      ok: false,
+      status: 500,
+      error: "http",
+      message: "internal error",
+    }),
+    "Lys returned HTTP 500: internal error",
+    "500 is not reported as unreachable",
+  );
+});
+
+test("a 401 or 400 never uses the tunnel wording", () => {
+  for (const status of [400, 401]) {
+    const toast = sendFailureToast({
+      ok: false,
+      status,
+      error: "http",
+      message: "x",
+    });
+    assertTrue(
+      !toast.includes("SSH tunnel"),
+      `HTTP ${status} must not claim the endpoint is down`,
+    );
+  }
+});
+
+test("server messages are trimmed and capped for a toast", () => {
+  assertEqual(
+    responseErrorMessage({ error: "  company: is required  " }),
+    "company: is required",
+    "trimmed",
+  );
+  assertEqual(responseErrorMessage(null), "", "null body");
+  assertEqual(responseErrorMessage({ error: 42 }), "", "non-string error");
+  assertEqual(
+    responseErrorMessage({ error: "x".repeat(500) }).length,
+    MAX_ERROR_MESSAGE_LENGTH,
+    "capped",
+  );
+});
+
+test("a stale extension context asks for a tab refresh", () => {
+  const stale = new Error("Extension context invalidated.");
+  const staleLower = new Error("extension context invalidated");
+  const disconnected = new Error(
+    "Could not establish connection. Receiving end does not exist.",
+  );
+
+  assertTrue(isStaleContextError(stale), "thrown Error is detected");
+  assertTrue(
+    isStaleContextError("Extension context invalidated."),
+    "plain message is detected",
+  );
+  assertTrue(isStaleContextError(staleLower), "matching ignores case");
+  assertTrue(!isStaleContextError(disconnected), "other errors are not stale");
+  assertTrue(!isStaleContextError(undefined), "undefined is not stale");
+
+  assertEqual(sendErrorToast(stale), TOAST_STALE_CONTEXT, "stale toast");
+  assertEqual(
+    sendErrorToast(disconnected),
+    TOAST_UNREACHABLE,
+    "a real send failure stays not-reachable",
+  );
+});
+
+test("an empty company becomes Unknown company instead of dropping the job", () => {
+  assertEqual(companyForJob(""), UNKNOWN_COMPANY, "empty");
+  assertEqual(companyForJob("   "), UNKNOWN_COMPANY, "whitespace only");
+  assertEqual(companyForJob(null), UNKNOWN_COMPANY, "null");
+  assertEqual(companyForJob("Acme"), "Acme", "real name kept");
+});
+
+test("an unknown response is not mistaken for a specific failure", () => {
+  assertEqual(sendFailureToast(null), TOAST_UNEXPECTED, "no response");
+  assertEqual(
+    sendFailureToast({ ok: false, status: 0, error: "bad-job" }),
+    TOAST_UNEXPECTED,
+    "bad-job has no dedicated toast yet",
   );
 });

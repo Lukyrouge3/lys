@@ -7,7 +7,8 @@
   "use strict";
 
   const api = globalThis.LysExtract;
-  if (!api) return;
+  const protocol = globalThis.LysProtocol;
+  if (!api || !protocol) return;
 
   const HOST_ID = "lys-send-to-lys-host";
   const TOAST_DURATION_MS = 5000;
@@ -228,30 +229,7 @@
       return;
     }
 
-    if (response.error === "config") {
-      showToast("Check token/endpoint in options", "error");
-      return;
-    }
-
-    if (response.error === "network" || response.error === "timeout") {
-      showToast(
-        "Lys not reachable (is the SSH tunnel up?)",
-        "error",
-      );
-      return;
-    }
-
-    if (response.status === 400 || response.status === 401) {
-      showToast("Check token/endpoint in options", "error");
-      return;
-    }
-
-    if (response.status) {
-      showToast(`Lys returned HTTP ${response.status}.`, "error");
-      return;
-    }
-
-    showToast("Lys gave an unexpected response.", "error");
+    showToast(protocol.sendFailureToast(response), "error");
   }
 
   function onSendClick(event) {
@@ -284,11 +262,8 @@
 
     sendJob(result.job)
       .then(handleResponse)
-      .catch(() => {
-        showToast(
-          "Lys not reachable (is the SSH tunnel up?)",
-          "error",
-        );
+      .catch((error) => {
+        showToast(protocol.sendErrorToast(error), "error");
       })
       .finally(() => {
         sending = false;
