@@ -143,6 +143,35 @@ export async function prepCapReached(at = Date.now()): Promise<boolean> {
   return prepared >= cap;
 }
 
+export const INTERRUPTED_PREP_NOTE = "interrupted by a restart";
+
+/**
+ * Requeues jobs a crash left mid-preparation. Only correct at startup: while
+ * the process is up, a preparing row belongs to a live run. The attempt count
+ * is kept, so a job that keeps getting interrupted still runs out of tries.
+ */
+export async function recoverInterruptedPrep(): Promise<number> {
+  const { count } = await prisma.job.updateMany({
+    where: { status: "preparing" },
+    data: { status: "queued", prepNote: INTERRUPTED_PREP_NOTE },
+  });
+  if (count > 0) {
+    logger.warn(`jobs: recovered ${count} job(s) interrupted while preparing`);
+  }
+  return count;
+}
+
+/**
+ * The jobs a restart just requeued that are still worth preparing. Rank and
+ * attempts are unchanged, so a job that used them all stays out of the queue.
+ */
+export async function interruptedPrepJobs(): Promise<Job[]> {
+  const jobs = await prisma.job.findMany({
+    where: { status: "queued", prepNote: INTERRUPTED_PREP_NOTE },
+  });
+  return jobs.filter((job) => shouldPrepare(job));
+}
+
 /**
  * Prepares and delivers one job. Throws only when the job itself cannot be
  * loaded; every later failure is recorded on the row and returned. A tracker

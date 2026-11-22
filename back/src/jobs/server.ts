@@ -4,7 +4,12 @@
 import * as z from "zod";
 import type { Job } from "@/generated/prisma/client.ts";
 import { processJob } from "@/jobs/process.ts";
-import { prepareJob, shouldPrepare } from "@/jobs/prep.ts";
+import {
+  interruptedPrepJobs,
+  prepareJob,
+  recoverInterruptedPrep,
+  shouldPrepare,
+} from "@/jobs/prep.ts";
 import { loadJobsToken } from "@/jobs/token.ts";
 import type { JobInput } from "@/jobs/store.ts";
 import { saveJob } from "@/jobs/store.ts";
@@ -354,6 +359,19 @@ export async function startJobServer(
       );
     }
   });
+
+  // A crash can leave a job mid-prep, where no queue would ever pick it up
+  const recovered = await recoverInterruptedPrep();
+  if (recovered > 0) {
+    for (const job of await interruptedPrepJobs()) {
+      const depth = prepQueue.enqueue(job.id);
+      logger.debug(
+        `jobs: prep re-queued ${
+          shortJobId(job.id)
+        } after a restart (prep queue ${depth}) ${job.url}`,
+      );
+    }
+  }
 
   try {
     const server = Deno.serve({
