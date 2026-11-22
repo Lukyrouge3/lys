@@ -8,12 +8,21 @@ import { writeJobToInbox } from "@/jobs/inbox.ts";
 import { rankAndStore } from "@/jobs/rank.ts";
 import { markInboxWritten, markNotified } from "@/jobs/store.ts";
 import { logger } from "@/utils/logger.ts";
+import { withTimeout } from "@/utils/timeout.ts";
+
+/** A Nextcloud write that takes longer than this is treated as failed. */
+export const INBOX_TIMEOUT_MS = 20_000;
+
+/** A Discord ping that takes longer than this is treated as failed. */
+export const NOTIFY_TIMEOUT_MS = 15_000;
 
 export type ProcessDeps = {
   /** Ranks and stores the job; the real one never throws on a ranking failure. */
   rank: typeof rankAndStore;
   notify: (text: string) => Promise<void>;
   writeInbox: (job: Job) => Promise<void>;
+  /** Overrides INBOX_TIMEOUT_MS so a test does not wait 20 seconds. */
+  inboxTimeoutMs: number;
 };
 
 /** Called when a job is processed with no notifier wired (e.g. from a tool). */
@@ -33,6 +42,7 @@ export async function processJob(
   const rank = deps.rank ?? rankAndStore;
   const notify = deps.notify ?? noNotifier;
   const writeInbox = deps.writeInbox ?? writeJobToInbox;
+  const inboxTimeoutMs = deps.inboxTimeoutMs ?? INBOX_TIMEOUT_MS;
 
   let job: Job;
   try {
@@ -46,7 +56,11 @@ export async function processJob(
   // A null rank (the ranker failed) gets neither, so a retry can do both
   if (job.rank === "apply" && job.notifiedAt === null) {
     try {
-      await notify(formatJobNotice(job));
+      await withTimeout(
+        notify(formatJobNotice(job)),
+        NOTIFY_TIMEOUT_MS,
+        `Pinging for job ${job.id}`,
+      );
       job = await markNotified(job.id);
     } catch (err) {
       logger.warn(`Pinging for job ${jobId} failed: ${err}`);
@@ -58,7 +72,12 @@ export async function processJob(
     job.inboxWrittenAt === null
   ) {
     try {
-      await writeInbox(job);
+      // Deadline first: a hung WebDAV write would block every later job
+      await withTimeout(
+        writeInbox(job),
+        inboxTimeoutMs,
+        `Writing job ${job.id} to the inbox`,
+      );
       job = await markInboxWritten(job.id);
     } catch (err) {
       logger.warn(`Writing job ${jobId} to the inbox failed: ${err}`);

@@ -200,6 +200,30 @@ Deno.test({
           assert(stored.notifiedAt !== null);
         },
       );
+      await t.step(
+        "a hung inbox write times out and does not block the job",
+        async () => {
+          await truncate("Job");
+          const job = await addJob("inbox-hangs");
+          const calls = recorder();
+
+          const result = await processJob(job.id, {
+            rank: rankAs("apply"),
+            notify: calls.notify,
+            // Never settles, like WebDAV against an unreachable Nextcloud
+            writeInbox: () => new Promise<void>(() => {}),
+            inboxTimeoutMs: 20,
+          });
+
+          assertEquals(result?.id, job.id);
+          // The ping happened before the inbox step and still counted
+          assertEquals(calls.notified.length, 1);
+
+          const stored = await fresh(job.id);
+          assert(stored.notifiedAt !== null);
+          assertEquals(stored.inboxWrittenAt, null);
+        },
+      );
     } finally {
       await closeDb();
     }

@@ -50,11 +50,13 @@ services:
     # cliproxy). Dev machines running the bot outside docker map those
     # names in /etc/hosts instead.
     env_file: ./back/.env
-    # mail.deneria.net's public record points at the wrong host for
-    # IMAPS; the LAN address is the one that answers. Same as the
-    # hosts entry on dev machines.
+    # The public DNS records of mail.deneria.net and nextcloud.deneria.net
+    # don't answer from inside the container (the bot timed out reaching
+    # Nextcloud); the LAN addresses do. Same as the hosts entries on dev
+    # machines.
     extra_hosts:
       - "mail.deneria.net:10.10.10.12"
+      - "nextcloud.deneria.net:10.10.10.10"
     # The jobs API (browser extension -> bot) binds every interface INSIDE the
     # container (JOBS_HOST); the publish rule above keeps the port on the host's
     # loopback only, so reach it through an SSH tunnel:
