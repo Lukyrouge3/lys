@@ -52,6 +52,31 @@ export function generateStreamRequest(
   return request;
 }
 
+// A hung provider call would stall the whole assistant (and the mail watcher
+// shares the process), so every request gets a deadline. Override it with
+// LLM_TIMEOUT_MS when a slower model legitimately needs more than two minutes.
+const DEFAULT_LLM_TIMEOUT_MS = 120_000;
+
+export function llmTimeoutMs(): number {
+  const raw = Deno.env.get("LLM_TIMEOUT_MS");
+  if (!raw) return DEFAULT_LLM_TIMEOUT_MS;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : DEFAULT_LLM_TIMEOUT_MS;
+}
+
+function isTimeout(error: unknown): boolean {
+  // The SDK sometimes wraps fetch errors, so follow the cause chain as well.
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth++) {
+    const name = (current as { name?: string }).name;
+    if (name === "TimeoutError" || name === "AbortError") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export type StreamResponse = OpenAI.Chat.Completions.ChatCompletionChunk;
 
 export type StreamedToolCall = { id: string; name: string; arguments: string };
@@ -107,9 +132,12 @@ export async function streamResponse(
   let lastChunk: OpenAI.Chat.ChatCompletionChunk | null = null;
 
   const dump = startDump(request);
+  const timeoutMs = llmTimeoutMs();
 
   try {
-    const stream = await openai.chat.completions.create(request);
+    const stream = await openai.chat.completions.create(request, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
 
     const toolCalls: StreamedToolCall[] = [];
     for await (const chunk of stream) {
@@ -145,6 +173,7 @@ export async function streamResponse(
     return { content, llmCall, toolCalls: usableToolCalls(toolCalls) };
   } catch (err) {
     dump({ error: String(err) });
+    const timedOut = isTimeout(err);
     await prisma.llmCall.create({
       data: {
         providerId: provider.id,
@@ -153,10 +182,20 @@ export async function streamResponse(
         status: "Error",
         latencyMs: Math.round(performance.now() - start),
         request: request as unknown as Prisma.InputJsonValue,
-        error: String(err),
+        error: timedOut
+          ? `timeout: no answer from the provider within ${timeoutMs} ms (${
+            String(err)
+          })`
+          : String(err),
         conversationId: conversationId,
       },
     });
+    if (timedOut) {
+      throw new Error(
+        `The model did not answer within ${timeoutMs} ms; the request was aborted (timeout).`,
+        { cause: err },
+      );
+    }
     throw err;
   }
 }

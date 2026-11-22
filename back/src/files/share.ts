@@ -1,5 +1,7 @@
 // Nextcloud sharing goes through the OCS API, not WebDAV.
 // https://docs.nextcloud.com/server/latest/developer_manual/client_apis/OCS/ocs-share-api.html
+import { cleanForContext } from "@/files/format.ts";
+import { logger } from "@/utils/logger.ts";
 
 export type ShareMode = "user" | "link";
 
@@ -54,9 +56,11 @@ export function shareRequest(
   return request;
 }
 
+type OcsMeta = { status?: string; statuscode?: number; message?: string };
+
 type OcsResponse = {
   ocs?: {
-    meta?: { status?: string; statuscode?: number; message?: string };
+    meta?: OcsMeta;
     data?: {
       id?: string;
       url?: string;
@@ -66,6 +70,8 @@ type OcsResponse = {
     };
   };
 };
+
+type OcsEnvelope = { ocs?: { meta?: OcsMeta; data?: unknown } };
 
 export type ShareResult = {
   id: string;
@@ -80,7 +86,7 @@ export function parseShareResponse(json: unknown): ShareResult {
   if (meta?.status !== "ok" || !response.ocs?.data?.id) {
     throw new Error(
       meta?.message
-        ? `Nextcloud refused the share: ${meta.message}`
+        ? `Nextcloud refused the share: ${cleanForContext(meta.message)}`
         : "Nextcloud refused the share",
     );
   }
@@ -91,6 +97,46 @@ export function parseShareResponse(json: unknown): ShareResult {
     target: data.file_target,
     ...(data.expiration ? { expiration: data.expiration } : {}),
   };
+}
+
+/**
+ * One OCS call. Nextcloud answers HTTP 200 even when it refuses the operation,
+ * putting the real outcome in `ocs.meta.status`, so `response.ok` alone is not
+ * enough. `refusal` completes "Nextcloud refused ..." in the error.
+ */
+async function ocsRequest(
+  url: string,
+  refusal: string,
+  options: { method: string; body?: URLSearchParams } = { method: "GET" },
+): Promise<OcsEnvelope> {
+  const headers: Record<string, string> = {
+    "OCS-APIRequest": "true",
+    "Authorization": authHeader(),
+    "Accept": "application/json",
+  };
+  if (options.body) {
+    headers["Content-Type"] = "application/x-www-form-urlencoded";
+  }
+
+  const response = await fetch(url, {
+    method: options.method,
+    headers,
+    body: options.body,
+  });
+  if (!response.ok) {
+    throw new Error(`Nextcloud answered ${response.status}`);
+  }
+
+  const json = await response.json() as OcsEnvelope;
+  const meta = json.ocs?.meta;
+  if (meta?.status !== "ok") {
+    throw new Error(
+      meta?.message
+        ? `Nextcloud refused ${refusal}: ${cleanForContext(meta.message)}`
+        : `Nextcloud refused ${refusal}`,
+    );
+  }
+  return json;
 }
 
 export async function createShare(
@@ -112,21 +158,12 @@ export async function createShare(
     body.set(key, String(value));
   }
 
-  const response = await fetch(`${endpoint()}?format=json`, {
-    method: "POST",
-    headers: {
-      "OCS-APIRequest": "true",
-      "Authorization": authHeader(),
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json",
-    },
-    body,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Nextcloud answered ${response.status}`);
-  }
-  return parseShareResponse(await response.json());
+  const response = await ocsRequest(
+    `${endpoint()}?format=json`,
+    "the share",
+    { method: "POST", body },
+  );
+  return parseShareResponse(response);
 }
 
 type OcsSharesResponse = {
@@ -154,28 +191,10 @@ export type ShareInfo = {
 
 /** Every share the account owns, link and user shares alike. */
 export async function listShares(): Promise<ShareInfo[]> {
-  const response = await fetch(`${endpoint()}?format=json`, {
-    method: "GET",
-    headers: {
-      "OCS-APIRequest": "true",
-      "Authorization": authHeader(),
-      "Accept": "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Nextcloud answered ${response.status}`);
-  }
-
-  const json = (await response.json()) as OcsSharesResponse;
-  const meta = json.ocs?.meta;
-  if (meta && meta.status !== "ok") {
-    throw new Error(
-      meta.message
-        ? `Nextcloud refused to list shares: ${meta.message}`
-        : "Nextcloud refused to list shares",
-    );
-  }
+  const json = await ocsRequest(
+    `${endpoint()}?format=json`,
+    "to list shares",
+  ) as OcsSharesResponse;
 
   const data = Array.isArray(json.ocs?.data) ? json.ocs.data : [];
   return data
@@ -190,23 +209,44 @@ export async function listShares(): Promise<ShareInfo[]> {
     }));
 }
 
-/** A share without an expiration date never expires. */
+/**
+ * Nextcloud writes expirations as "YYYY-MM-DD HH:MM:SS" in UTC, with no zone,
+ * while `expiryDate` writes a UTC date. Returns null when it cannot be read.
+ */
+export function parseExpiration(value: string): Date | null {
+  const text = value.trim();
+  if (!text) return null;
+  const utc = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)
+    ? `${text.replace(" ", "T")}Z`
+    : text;
+  const date = new Date(utc);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * A share without an expiration date never expires. An expiration we cannot
+ * parse is treated as expired: removing one link too early is recoverable,
+ * while a link that is never cleaned up is not. It is logged so clean_links is
+ * not silently guessing.
+ */
 export function isExpired(expiration?: string, now = new Date()): boolean {
   if (!expiration) return false;
-  const date = new Date(expiration);
-  return !Number.isNaN(date.getTime()) && date.getTime() <= now.getTime();
+  const date = parseExpiration(expiration);
+  if (!date) {
+    logger.warn(
+      `Unreadable share expiration "${
+        cleanForContext(expiration)
+      }"; treating the link as expired.`,
+    );
+    return true;
+  }
+  return date.getTime() <= now.getTime();
 }
 
 export async function deleteShare(id: string): Promise<void> {
-  const response = await fetch(`${endpoint()}/${id}?format=json`, {
-    method: "DELETE",
-    headers: {
-      "OCS-APIRequest": "true",
-      "Authorization": authHeader(),
-      "Accept": "application/json",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Nextcloud answered ${response.status}`);
-  }
+  await ocsRequest(
+    `${endpoint()}/${encodeURIComponent(id)}?format=json`,
+    "to delete the share",
+    { method: "DELETE" },
+  );
 }

@@ -9,6 +9,17 @@ export type DavEntry = {
   mime?: string;
 };
 
+// deno-lint-ignore no-control-regex -- stripping control characters is the point
+const CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+
+/**
+ * File names and remote messages can carry newlines and other control
+ * characters; left raw they would forge extra lines in the model's context.
+ */
+export function cleanForContext(value: string): string {
+  return value.replace(CONTROL_CHARS, " ");
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -28,12 +39,13 @@ export function formatDate(value?: string): string {
 
 /** One compact line per entry, cheap enough for a small model to read. */
 export function formatEntry(entry: DavEntry): string {
+  const name = cleanForContext(entry.basename);
   if (entry.type === "directory") {
-    return `[dir]  ${entry.basename}`;
+    return `[dir]  ${name}`;
   }
   return `[file] ${formatSize(entry.size)}  ${
     formatDate(entry.lastmod)
-  }  ${entry.basename}`;
+  }  ${name}`;
 }
 
 /** Full path without the leading slash, for find results. */
@@ -43,10 +55,11 @@ export function entryPath(entry: DavEntry): string {
 
 /** Like formatEntry, but shows the full path so the model can act on it. */
 export function formatPathEntry(entry: DavEntry): string {
+  const path = cleanForContext(entryPath(entry));
   if (entry.type === "directory") {
-    return `[dir]  ${entryPath(entry)}`;
+    return `[dir]  ${path}`;
   }
-  return `[file] ${formatSize(entry.size)}  ${formatDate(entry.lastmod)}  ${
-    entryPath(entry)
-  }`;
+  return `[file] ${formatSize(entry.size)}  ${
+    formatDate(entry.lastmod)
+  }  ${path}`;
 }
