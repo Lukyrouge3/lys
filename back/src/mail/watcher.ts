@@ -24,13 +24,34 @@ export type MailEvent = {
   date: Date | null;
   // First part of the plain-text body, for classification and notices
   preview: string;
+  // Threading and reply headers, when the server sends them in the envelope
+  messageId?: string;
+  replyTo?: string;
+};
+
+type EnvelopeAddress = {
+  name?: string | null;
+  address?: string | null;
 };
 
 type Envelope = {
   subject?: string | null;
   date?: string | Date | null;
-  from?: Array<{ name?: string | null; address?: string | null } | null> | null;
+  from?: EnvelopeAddress[] | null;
+  replyTo?: EnvelopeAddress[] | null;
+  messageId?: string | null;
 };
+
+function formatAddresses(people?: EnvelopeAddress[] | null): string {
+  return (people ?? [])
+    .map((person) =>
+      person?.name
+        ? `${person.name} <${person.address ?? ""}>`
+        : person?.address ?? ""
+    )
+    .filter(Boolean)
+    .join(", ");
+}
 
 export function toMailEvent(
   account: { id: string; name: string },
@@ -39,14 +60,9 @@ export function toMailEvent(
   preview = "",
 ): MailEvent {
   const envelope = msg.envelope;
-  const from = (envelope?.from ?? [])
-    .map((person) =>
-      person?.name
-        ? `${person.name} <${person.address ?? ""}>`
-        : person?.address ?? ""
-    )
-    .filter(Boolean)
-    .join(", ");
+  const from = formatAddresses(envelope?.from);
+  const replyTo = formatAddresses(envelope?.replyTo);
+  const messageId = envelope?.messageId?.trim();
   const date = envelope?.date ? new Date(envelope.date) : null;
 
   return {
@@ -58,6 +74,9 @@ export function toMailEvent(
     subject: envelope?.subject?.trim() || "(no subject)",
     date: date && !Number.isNaN(date.getTime()) ? date : null,
     preview,
+    // Spread only when present: a deep-equal on a plain envelope stays the same
+    ...(replyTo ? { replyTo } : {}),
+    ...(messageId ? { messageId } : {}),
   };
 }
 

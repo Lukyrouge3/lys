@@ -66,9 +66,89 @@ type ChatRequest = {
   temperature: number;
 };
 
+/**
+ * Words that invert the label right after them. The prompt asks for a bare
+ * label, but models sometimes answer "not noise, it is important"; reading the
+ * first match anywhere turned that into noise. Negation is checked on the
+ * clause the label belongs to, so the second, affirmative label still wins.
+ */
+const NEGATIONS = new Set([
+  "not",
+  "no",
+  "never",
+  "none",
+  "neither",
+  "nor",
+  "isn't",
+  "aren't",
+  "wasn't",
+  "weren't",
+  "don't",
+  "doesn't",
+  "didn't",
+  "cannot",
+  "can't",
+  "won't",
+  "wouldn't",
+  "shouldn't",
+  "pas",
+  "jamais",
+  "aucun",
+  "aucune",
+  "rien",
+  "n'est",
+]);
+
+/** Articles and adverbs that may sit between a negation and its label. */
+const NEGATION_FILLERS = new Set([
+  "a",
+  "an",
+  "the",
+  "really",
+  "very",
+  "so",
+  "that",
+  "particularly",
+  "especially",
+]);
+
+/**
+ * The prompt's first line is the one word that answers the question. Only that
+ * line is read, and a label is ignored when the nearest word before it negates
+ * it. Scanning the whole answer was how "not noise, it is important" became
+ * noise.
+ */
+function labelInFirstLine(
+  answer: string,
+  labelOf: (token: string) => string | null,
+): string | null {
+  const first = answer
+    .split(/\r?\n/)
+    .find((line) => line.trim().length > 0) ?? "";
+
+  for (const clause of first.toLowerCase().split(/[,;:.!?()[\]{}—–]+/)) {
+    const tokens = clause.match(/[\p{L}']+/gu) ?? [];
+    for (let i = 0; i < tokens.length; i++) {
+      const label = labelOf(tokens[i]);
+      if (!label) continue;
+
+      let before = i - 1;
+      while (before >= 0 && NEGATION_FILLERS.has(tokens[before])) before--;
+      if (before >= 0 && NEGATIONS.has(tokens[before])) continue;
+      return label;
+    }
+  }
+  return null;
+}
+
+const IMPORTANCE_WORDS = new Set(["important", "normal", "noise"]);
+
 export function parseImportance(answer: string): Importance {
-  const match = answer.toLowerCase().match(/\b(important|normal|noise)\b/);
-  return (match?.[1] as Importance) ?? "normal";
+  const label = labelInFirstLine(
+    answer,
+    (token) => IMPORTANCE_WORDS.has(token) ? token : null,
+  );
+  return (label as Importance | null) ?? "normal";
 }
 
 /** The importance, and for an important mail what it is about. */
@@ -80,19 +160,24 @@ export type MailVerdict = {
 const LABEL_LINE = /^(important|normal|noise)\b[\s:.;–—-]*/i;
 
 /**
- * Reads the two-line answer. A model that puts the label and the topic on one
- * line is understood too; an answer with no usable line is simply without a
- * topic, and the notice falls back to the subject.
+ * Reads the two-line answer. The importance comes from the first line only; a
+ * model that puts the label and the topic on that line is understood too. An
+ * answer with no usable first line is without a topic, and the notice falls
+ * back to the subject.
  */
 export function parseVerdict(answer: string): MailVerdict {
-  const lines = answer.split("\n").map((line) => line.trim()).filter(Boolean);
-  const labelled = lines.find((line) => LABEL_LINE.test(line));
-  const rest = labelled ? labelled.replace(LABEL_LINE, "") : "";
-  const others = labelled ? lines.filter((line) => line !== labelled) : [];
+  const lines = answer
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const first = lines[0] ?? "";
+  const label = first.match(LABEL_LINE);
+  const rest = label ? first.slice(label[0].length).trim() : "";
+  const others = label ? lines.slice(1) : [];
 
   return {
     importance: parseImportance(answer),
-    topic: [rest, ...others].filter(Boolean).join(" ").replace(/[.!?\s]+$/, ""),
+    topic: [rest, ...others].join(" ").replace(/[.!?\s]+$/, "").trim(),
   };
 }
 
@@ -107,14 +192,16 @@ const PLURALS: Record<string, DocumentCategory> = {
   identities: "identity",
 };
 
+const CATEGORY_WORDS = new Set<string>(DOCUMENT_CATEGORIES);
+
+function categoryOf(token: string): DocumentCategory | null {
+  if (CATEGORY_WORDS.has(token)) return token as DocumentCategory;
+  return PLURALS[token] ?? null;
+}
+
 export function parseCategory(answer: string): DocumentCategory {
-  for (const token of answer.toLowerCase().match(/[a-z]+/g) ?? []) {
-    if ((DOCUMENT_CATEGORIES as readonly string[]).includes(token)) {
-      return token as DocumentCategory;
-    }
-    if (PLURALS[token]) return PLURALS[token];
-  }
-  return "other";
+  return (labelInFirstLine(answer, categoryOf) as DocumentCategory | null) ??
+    "other";
 }
 
 export function classifyPrompt(mail: MailEvent): string {
@@ -259,17 +346,61 @@ export async function askAgent<T>(
   }
 }
 
-/** Fail-open: a broken classifier means "normal", never an alarm about noise. */
-export async function classifyMail(mail: MailEvent): Promise<MailVerdict> {
-  try {
-    return await askAgent(
-      "mail:classify",
-      (model) => classifyRequest(model, mail),
-      parseVerdict,
-    );
-  } catch {
-    return { importance: "normal", topic: "" };
+/**
+ * A provider outage must not silently skip an important mail, but it must not
+ * turn every mail in the outage into an alarm either. After the retry fails the
+ * first mail is treated as important and at most one such fail-open notice is
+ * produced every 15 minutes; later failures in that window return normal and
+ * log a warning.
+ */
+const FAIL_OPEN_INTERVAL_MS = 15 * 60_000;
+let lastFailOpenAt = Number.NEGATIVE_INFINITY;
+let clock: () => number = Date.now;
+
+/** Test hook: the fail-open rate limit is module state. */
+export function setClassifyClockForTests(read: (() => number) | null): void {
+  clock = read ?? Date.now;
+}
+
+/** Test hook: clears the fail-open window. */
+export function resetClassifyStateForTests(): void {
+  lastFailOpenAt = Number.NEGATIVE_INFINITY;
+  clock = Date.now;
+}
+
+export async function classifyMail(
+  mail: MailEvent,
+  ask: typeof askAgent = askAgent,
+): Promise<MailVerdict> {
+  let failure: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await ask(
+        "mail:classify",
+        (model) => classifyRequest(model, mail),
+        parseVerdict,
+      );
+    } catch (err) {
+      failure = err;
+      if (attempt === 0) {
+        logger.warn(`Mail classification failed, retrying once: ${err}`);
+      }
+    }
   }
+
+  const now = clock();
+  if (now - lastFailOpenAt >= FAIL_OPEN_INTERVAL_MS) {
+    lastFailOpenAt = now;
+    logger.warn(
+      `Mail could not be classified (${failure}); treating it as important`,
+    );
+    return { importance: "important", topic: "could not be classified" };
+  }
+
+  logger.warn(
+    `Mail could not be classified (${failure}); already failed open recently, treating it as normal`,
+  );
+  return { importance: "normal", topic: "" };
 }
 
 /** Fail-open: an unfiled attachment lands in "other" instead of being dropped. */

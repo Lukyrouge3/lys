@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import prisma from "@/db.ts";
 import { closeDb, truncate } from "./db.ts";
 import type { JobInput } from "@/jobs/store.ts";
@@ -6,6 +6,8 @@ import { saveJob, setRank, shortId } from "@/jobs/store.ts";
 import type { JobStatus } from "@/generated/prisma/client.ts";
 import { ListJobsTool } from "@/tools/jobs/listJobs.ts";
 import { MarkJobTool } from "@/tools/jobs/markJob.ts";
+import { PrepareJobTool } from "@/tools/jobs/prepareJob.ts";
+import type { TrackerEntry } from "@/prep/tracker.ts";
 import {
   generateToolRequest,
   runTool,
@@ -83,10 +85,14 @@ Deno.test({
   async fn(t) {
     try {
       await t.step(
-        "the default list hides skip and finished jobs",
+        "the default list hides skip and finished jobs, keeps review",
         async () => {
           await truncate("Job");
           await addJob({ title: "keep me" }, { rank: "apply" });
+          await addJob({ title: "needs review" }, {
+            rank: "apply",
+            status: "review",
+          });
           await addJob({ title: "skipped" }, { rank: "skip" });
           await addJob({ title: "applied" }, {
             rank: "apply",
@@ -99,11 +105,12 @@ Deno.test({
 
           const output = await list();
           assert(output.includes("keep me"));
+          assert(output.includes("needs review"));
           assert(!output.includes("skipped"));
           assert(!output.includes("applied"));
           assert(!output.includes("dropped"));
-          assertEquals(blocks(output).length, 1);
-          assert(output.endsWith("1 job shown."));
+          assertEquals(blocks(output).length, 2);
+          assert(output.endsWith("2 jobs shown."));
         },
       );
 
@@ -360,6 +367,127 @@ Deno.test({
       );
 
       await t.step(
+        "mark_job syncs a prepared job to the tracker",
+        async () => {
+          await truncate("Job");
+          const job = await addJob({ title: "Tracked role" }, {
+            rank: "apply",
+          });
+          await prisma.job.update({
+            where: { id: job.id },
+            data: {
+              prepFolder: "Postulations/acme/2026-11-10",
+              preparedAt: new Date("2026-11-10T09:00:00Z"),
+            },
+          });
+
+          let entry: TrackerEntry | undefined;
+          const tracker = (received: TrackerEntry) => {
+            entry = received;
+            return Promise.resolve({
+              inserted: false,
+              rows: 1,
+              path: "Postulations/Applications.md",
+            });
+          };
+
+          const tool = new MarkJobTool({ tracker });
+          const output = await tool.run(context, {
+            job: shortId(job),
+            status: "applied",
+          });
+
+          assertEquals(output, 'Marked "Tracked role" at Acme as applied.');
+          assertEquals(entry?.applied, "2026-11-10");
+          assertEquals(entry?.status, "Sent");
+          assertEquals(entry?.folder, "Postulations/acme/2026-11-10");
+          assertEquals(entry?.company, "Acme");
+        },
+      );
+
+      await t.step(
+        "a tracker failure is reported, not turned into an error",
+        async () => {
+          await truncate("Job");
+          const job = await addJob({ title: "No tracker" }, { rank: "apply" });
+          await prisma.job.update({
+            where: { id: job.id },
+            data: {
+              prepFolder: "Postulations/acme/2026-11-11",
+              preparedAt: new Date("2026-11-11T09:00:00Z"),
+            },
+          });
+
+          const tool = new MarkJobTool({
+            tracker: () => Promise.reject(new Error("Nextcloud is down")),
+          });
+          const output = await tool.run(context, {
+            job: shortId(job),
+            status: "interview",
+          });
+
+          assertEquals(
+            output,
+            'Marked "No tracker" at Acme as interview. (tracker not updated: Nextcloud is down)',
+          );
+          const stored = await prisma.job.findUniqueOrThrow({
+            where: { id: job.id },
+          });
+          assertEquals(stored.status, "interview");
+        },
+      );
+
+      await t.step(
+        "prepare_job forces one preparation and reports",
+        async () => {
+          await truncate("Job");
+          const job = await addJob({ title: "Prepare me" }, { rank: "apply" });
+          const calls: Array<{ ref: string; force?: boolean }> = [];
+
+          const tool = new PrepareJobTool({
+            prepare: (ref, deps) => {
+              calls.push({ ref, force: deps?.force });
+              return Promise.resolve({
+                prepared: true,
+                job: { ...job, status: "ready" },
+                folder: "Postulations/acme/2026-11-10",
+              });
+            },
+          });
+
+          const output = await tool.run(context, { job: shortId(job) });
+
+          assert(output.includes("Postulations/acme/2026-11-10"));
+          assert(output.includes("Prepared"));
+          assertEquals(calls.length, 1);
+          assertEquals(calls[0].ref, shortId(job));
+          assertEquals(calls[0].force, true);
+        },
+      );
+
+      await t.step("prepare_job reports a guard failure", async () => {
+        await truncate("Job");
+        const job = await addJob({ title: "Cannot prepare" }, {
+          rank: "apply",
+        });
+
+        const tool = new PrepareJobTool({
+          prepare: () =>
+            Promise.resolve({
+              prepared: false,
+              job,
+              reason: "disabled",
+            }),
+        });
+
+        await assertRejects(
+          () => tool.run(context, { job: shortId(job) }),
+          Error,
+          'Preparation failed for "Cannot prepare" at Acme: disabled',
+        );
+      });
+
+      await t.step(
         "both tools run through runTool without approval",
         async () => {
           await truncate("Job");
@@ -412,6 +540,7 @@ Deno.test({
         );
         assert(names.includes("list_jobs"));
         assert(names.includes("mark_job"));
+        assert(names.includes("prepare_job"));
 
         const markRequest = requests.find((request) =>
           request.type === "function" && request.function.name === "mark_job"

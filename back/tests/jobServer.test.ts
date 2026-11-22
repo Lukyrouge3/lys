@@ -241,21 +241,25 @@ Deno.test("a new job answers 201 at once and is queued once", async () => {
 });
 
 const done = {
-  notifiedAt: new Date("2026-11-01T10:00:00Z"),
   inboxWrittenAt: new Date("2026-11-01T10:00:00Z"),
+};
+
+const preparedDone = {
+  status: "ready" as const,
+  preparedAt: new Date("2026-11-01T10:00:00Z"),
 };
 
 Deno.test("a fully processed duplicate is not processed again", async () => {
   const cases = [
-    fakeJob({ id: "old-apply", rank: "apply", ...done }),
+    fakeJob({ id: "old-apply", rank: "apply", ...preparedDone, ...done }),
     fakeJob({
       id: "old-maybe",
       rank: "maybe",
+      ...preparedDone,
       inboxWrittenAt: done.inboxWrittenAt,
     }),
     fakeJob({ id: "old-skip", rank: "skip" }),
   ];
-
   for (const job of cases) {
     const { deps, enqueued } = setup(() =>
       Promise.resolve({ job, duplicate: true })
@@ -266,6 +270,25 @@ Deno.test("a fully processed duplicate is not processed again", async () => {
     assertEquals(await response.json(), { id: job.id, duplicate: true });
     assertEquals(enqueued, []);
   }
+});
+
+Deno.test("a duplicate whose prep is unfinished is retried", async () => {
+  const job = fakeJob({
+    id: "old-prep",
+    rank: "apply",
+    status: "queued",
+    prepAttempts: 1,
+    preparedAt: null,
+    inboxWrittenAt: done.inboxWrittenAt,
+  });
+  const { deps, enqueued } = setup(() =>
+    Promise.resolve({ job, duplicate: true })
+  );
+
+  const response = await handleJobRequest(post(payload()), deps);
+
+  assertEquals(response.status, 200);
+  assertEquals(enqueued, ["old-prep"]);
 });
 
 Deno.test("a duplicate whose ranking failed is retried", async () => {
@@ -282,19 +305,6 @@ Deno.test("a duplicate whose ranking failed is retried", async () => {
   assertEquals(enqueued, ["old-2"]);
 });
 
-Deno.test("a duplicate that was never pinged is retried", async () => {
-  const { deps, enqueued } = setup(() =>
-    Promise.resolve({
-      job: fakeJob({ id: "old-3", rank: "apply", ...done, notifiedAt: null }),
-      duplicate: true,
-    })
-  );
-
-  await handleJobRequest(post(payload()), deps);
-
-  assertEquals(enqueued, ["old-3"]);
-});
-
 Deno.test("a duplicate with no inbox file is retried", async () => {
   const { deps, enqueued } = setup(() =>
     Promise.resolve({
@@ -308,24 +318,38 @@ Deno.test("a duplicate with no inbox file is retried", async () => {
   assertEquals(enqueued, ["old-4"]);
 });
 
-Deno.test("needsProcessing reads the three fields", () => {
+Deno.test("needsProcessing reads rank, prep state and inboxWrittenAt", () => {
   assertEquals(needsProcessing(fakeJob({ rank: null })), true);
-  assertEquals(
-    needsProcessing(fakeJob({ rank: "apply", ...done, notifiedAt: null })),
-    true,
-  );
   assertEquals(
     needsProcessing(fakeJob({ rank: "maybe", ...done, inboxWrittenAt: null })),
     true,
   );
   // A skip is never written, so it is done once it is ranked
   assertEquals(needsProcessing(fakeJob({ rank: "skip" })), false);
-  assertEquals(needsProcessing(fakeJob({ rank: "apply", ...done })), false);
+  // A prepared job needs no Input bridge file
+  assertEquals(
+    needsProcessing(fakeJob({ rank: "apply", ...preparedDone })),
+    false,
+  );
+  // Prep still has attempts left: a re-click should retry it
   assertEquals(
     needsProcessing(
-      fakeJob({ rank: "maybe", inboxWrittenAt: done.inboxWrittenAt }),
+      fakeJob({
+        rank: "apply",
+        status: "queued",
+        prepAttempts: 1,
+        preparedAt: null,
+        inboxWrittenAt: done.inboxWrittenAt,
+      }),
     ),
-    false,
+    true,
+  );
+  // notifiedAt is not read any more: an apply job with no inbox file still runs
+  assertEquals(
+    needsProcessing(
+      fakeJob({ rank: "apply", inboxWrittenAt: null, notifiedAt: new Date() }),
+    ),
+    true,
   );
 });
 

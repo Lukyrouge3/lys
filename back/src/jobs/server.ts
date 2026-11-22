@@ -4,6 +4,7 @@
 import * as z from "zod";
 import type { Job } from "@/generated/prisma/client.ts";
 import { processJob } from "@/jobs/process.ts";
+import { prepareJob, shouldPrepare } from "@/jobs/prep.ts";
 import { loadJobsToken } from "@/jobs/token.ts";
 import type { JobInput } from "@/jobs/store.ts";
 import { saveJob } from "@/jobs/store.ts";
@@ -178,20 +179,31 @@ function toInput(data: ParsedJob): JobInput {
 }
 
 /**
- * Whether a second pass could still do something: an unranked job, an apply
- * job that was never pinged, or any job but a skip without an inbox file.
+ * Whether a second pass could still do something: an unranked job, a retryable
+ * preparation, or any ranked job but a skip whose inbox file is missing.
  */
 export function needsProcessing(
-  job: Pick<Job, "rank" | "notifiedAt" | "inboxWrittenAt">,
+  job: Pick<
+    Job,
+    | "rank"
+    | "inboxWrittenAt"
+    | "status"
+    | "prepAttempts"
+    | "preparedAt"
+  >,
 ): boolean {
   if (job.rank === null) return true;
-  if (job.rank === "apply" && job.notifiedAt === null) return true;
-  return job.rank !== "skip" && job.inboxWrittenAt === null;
+  // Prep is unfinished and still has attempts left: a re-click should retry it.
+  if (shouldPrepare(job)) return true;
+  if (job.rank === "skip") return false;
+  // Prepared documents are their own record; there is no Input bridge to wait for.
+  if (job.status === "ready" || job.status === "review") return false;
+  return job.inboxWrittenAt === null;
 }
 
 /**
  * Handles one request. The response is sent as soon as the row is stored; the
- * ranking and the Discord ping happen in the queue behind it.
+ * ranking and the inbox write happen in the queue behind it.
  */
 export async function handleJobRequest(
   req: Request,
@@ -242,9 +254,9 @@ export async function handleJobRequest(
 
     if (duplicate) {
       logger.info(
-        `jobs: duplicate ${id} (rank=${job.rank ?? "none"}, pinged=${
-          job.notifiedAt !== null
-        }, inbox=${job.inboxWrittenAt !== null})`,
+        `jobs: duplicate ${id} (rank=${job.rank ?? "none"}, inbox=${
+          job.inboxWrittenAt !== null
+        }) ${job.url}`,
       );
       // A re-click retries whatever the earlier run could not finish
       if (needsProcessing(job)) {
@@ -254,7 +266,9 @@ export async function handleJobRequest(
       return json({ id: job.id, duplicate: true }, 200);
     }
 
-    logger.info(`jobs: received ${id} "${clip(job.title)}" at ${job.company}`);
+    logger.info(
+      `jobs: received ${id} "${clip(job.title)}" at ${job.company} ${job.url}`,
+    );
     const depth = deps.enqueue(job.id);
     logger.debug(`jobs: queued ${id} (queue depth ${depth})`);
     return json({ id: job.id, duplicate: false }, 201);
@@ -265,33 +279,44 @@ export async function handleJobRequest(
   }
 }
 
+export type SerialQueue = {
+  enqueue: (jobId: string) => number;
+  depth: () => number;
+};
+
 /** One job at a time, in arrival order; a failure is logged, never thrown. */
 function serialQueue(
   run: (jobId: string) => Promise<void>,
-): (jobId: string) => number {
+): SerialQueue {
   let tail: Promise<void> = Promise.resolve();
   let pending = 0;
-  return (jobId) => {
-    pending += 1;
-    tail = tail.then(() => run(jobId)).catch((err) => {
-      logger.error(`jobs: queue ${shortJobId(jobId)} failed: ${err}`);
-    }).finally(() => {
-      pending -= 1;
-    });
-    return pending;
+  return {
+    enqueue: (jobId) => {
+      pending += 1;
+      tail = tail.then(() => run(jobId)).catch((err) => {
+        logger.error(`jobs: queue ${shortJobId(jobId)} failed: ${err}`);
+      }).finally(() => {
+        pending -= 1;
+      });
+      return pending;
+    },
+    depth: () => pending,
   };
 }
 
-export type JobServerOptions = {
-  notify: (text: string) => Promise<void>;
-};
+/**
+ * Options for the API. Nothing needs configuring today; the type stays exported
+ * and empty so callers can pass an object (or nothing) and fields can be added
+ * without breaking the call sites.
+ */
+export type JobServerOptions = Record<string, never>;
 
 /**
  * Binds the API and returns the server, or null when it cannot run (no token
  * yet, port taken). The Discord bot must survive either way.
  */
 export async function startJobServer(
-  opts: JobServerOptions,
+  _opts: JobServerOptions = {},
 ): Promise<Deno.HttpServer | null> {
   const token = await loadJobsToken();
   if (!token) {
@@ -312,8 +337,22 @@ export async function startJobServer(
     return null;
   }
 
-  const enqueue = serialQueue(async (jobId) => {
-    await processJob(jobId, { notify: opts.notify });
+  // Prep is slow (minutes) and must never hold ranking behind it, so it has
+  // its own serial queue.
+  const prepQueue = serialQueue(async (jobId) => {
+    await prepareJob(jobId);
+  });
+
+  const rankQueue = serialQueue(async (jobId) => {
+    const job = await processJob(jobId);
+    if (job && shouldPrepare(job)) {
+      const depth = prepQueue.enqueue(job.id);
+      logger.debug(
+        `jobs: prep queued ${
+          shortJobId(job.id)
+        } (rank queue ${rankQueue.depth()}, prep queue ${depth}) ${job.url}`,
+      );
+    }
   });
 
   try {
@@ -323,8 +362,16 @@ export async function startJobServer(
       onListen: ({ hostname, port }) => {
         logger.info(`jobs: listening on http://${hostname}:${port}`);
         logger.info(`jobs: inbox folder ${JOB_INBOX_FOLDER}`);
+        logger.info(
+          `jobs: queues -> rank ${rankQueue.depth()}, prep ${prepQueue.depth()}`,
+        );
       },
-    }, (req) => handleJobRequest(req, { token, save: saveJob, enqueue }));
+    }, (req) =>
+      handleJobRequest(req, {
+        token,
+        save: saveJob,
+        enqueue: rankQueue.enqueue,
+      }));
 
     // A listen failure (port taken) resolves through the server, not a throw
     server.finished.catch((err) => {

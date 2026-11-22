@@ -298,3 +298,10 @@ model Job {
   @@unique([source, externalId])
   @@index([status, rank])
 }
+
+// One row per recurring job the scheduler runs, so a restart can tell whether
+// today's run already happened.
+model ScheduledRun {
+  name      String   @id
+  lastRunAt DateTime
+}

@@ -14,6 +14,8 @@ import { MoveFileTool } from "@/tools/files/moveFile.ts";
 import { DeleteFileTool } from "@/tools/files/deleteFile.ts";
 import { ListJobsTool } from "@/tools/jobs/listJobs.ts";
 import { MarkJobTool } from "@/tools/jobs/markJob.ts";
+import { PrepareJobTool } from "@/tools/jobs/prepareJob.ts";
+import { MorningSummaryTool } from "@/tools/jobs/morningSummary.ts";
 import { EmitEvent } from "@/agent/events.ts";
 import { ApprovalStatus } from "@/generated/prisma/enums.ts";
 
@@ -36,6 +38,8 @@ export const defaultTools: ToolRegistry = new Map<string, Tool>(
     new DeleteFileTool(),
     new ListJobsTool(),
     new MarkJobTool(),
+    new PrepareJobTool(),
+    new MorningSummaryTool(),
   ].map((
     tool,
   ) => [tool.name, tool]),

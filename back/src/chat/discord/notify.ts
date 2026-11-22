@@ -1,5 +1,4 @@
 import type { Client } from "discord.js";
-import type { Job } from "@/generated/prisma/client.ts";
 import type { MailEvent } from "@/mail/watcher.ts";
 
 const NOTICE_CHARS = 200;
@@ -33,23 +32,6 @@ export function formatMailNotice(mail: MailEvent, topic = ""): string {
   return `📬 There is an important mail${what} from ${
     senderName(mail.from)
   } requiring your attention!`;
-}
-
-/** A job worth acting on: what it is, why, and where to apply. */
-export function formatJobNotice(
-  job: Pick<
-    Job,
-    "title" | "company" | "location" | "url" | "rankReason"
-  >,
-): string {
-  const title = cutNotice(job.title);
-  const company = cutNotice(job.company);
-  const where = job.location ? ` (${cutNotice(job.location)})` : "";
-  const reason = cutNotice(job.rankReason?.trim() ?? "");
-  // The reason is its own line so a long one wraps instead of burying the link
-  const why = reason ? `\n${reason}` : "";
-  // Angle brackets stop Discord from unfurling the posting
-  return `💼 Worth a look: **${title}** at ${company}${where}${why}\n<${job.url}>`;
 }
 
 export async function dmOwner(client: Client, content: string): Promise<void> {

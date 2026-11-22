@@ -70,7 +70,7 @@ Deno.test({
       });
 
       await t.step(
-        "a duplicate keeps its status, rank and ping but refreshes the text",
+        "a duplicate keeps its status, rank and timestamps but refreshes the text",
         async () => {
           await truncate("Job");
           const { job: first } = await saveJob(input());
@@ -153,11 +153,17 @@ Deno.test({
       );
 
       await t.step(
-        "the default list hides skip and finished statuses",
+        "the default list hides skip and finished statuses, keeps review",
         async () => {
           await truncate("Job");
           await addJob({ externalId: "keep", title: "keep" }, {
             rank: "apply",
+            createdAt: t0,
+          });
+          await addJob({ externalId: "review", title: "needs review" }, {
+            rank: "apply",
+            status: "review",
+            createdAt: new Date(t0.getTime() + 60_000),
           });
           await addJob({ externalId: "skip", title: "skip" }, { rank: "skip" });
           await addJob({ externalId: "dropped", title: "dropped" }, {
@@ -168,6 +174,7 @@ Deno.test({
 
           const jobs = await listJobs();
           assertEquals(jobs.map((job) => job.title), [
+            "needs review",
             "keep",
             "unranked queued",
           ]);

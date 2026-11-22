@@ -15,6 +15,8 @@
     "npm:discord.js@^14.27.0": "14.27.0",
     "npm:ical.js@^2.2.1": "2.2.1",
     "npm:imapflow@^2.12.1": "2.12.1",
+    "npm:nodemailer@6.9.16": "6.9.16",
+    "npm:nodemailer@^6.9.16": "6.9.16",
     "npm:pg@^8.23.1": "8.23.1",
     "npm:postal-mime@^4.2.1": "4.2.1",
     "npm:prisma@*": "7.10.1_@types+node@26.6.5_@types+react@19.3.0_react@19.3.1_react-dom@19.3.1",
@@ -1210,6 +1212,9 @@
         "formdata-polyfill"
       ]
     },
+    "nodemailer@6.9.16": {
+      "integrity": "sha512-psAuZdTIRN08HKVd/E8ObdV6NO7NTBY3KsC30F7M4H1OnmLCUNaS56FpYxyb26zWLSyYF9Ozch9KYHhHegsiOQ=="
+    },
     "ohash@2.0.12": {
       "integrity": "sha512-65S/5gk9YSsaRjcyf7Nfa6h/d3E8/1gslpXfI4W7Dxn/oap8IKRuNT5VXkLQ1YFKIEg4apRY4Pj6aiwFzrDdmw=="
     },
@@ -1587,6 +1592,7 @@
       "npm:discord.js@^14.27.0",
       "npm:ical.js@^2.2.1",
       "npm:imapflow@^2.12.1",
+      "npm:nodemailer@^6.9.16",
       "npm:pg@^8.23.1",
       "npm:postal-mime@^4.2.1",
       "npm:prisma@^7.10.1",

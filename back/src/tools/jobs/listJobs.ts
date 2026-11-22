@@ -89,7 +89,7 @@ export class ListJobsTool implements Tool {
   };
   argumentDescriptions = {
     status:
-      '"queued", "preparing", "ready", "review", "applied", "interview", "rejected", "dropped", or "all". Default: the open statuses (queued, preparing, ready).',
+      '"queued", "preparing", "ready", "review", "applied", "interview", "rejected", "dropped", or "all". Default: the open statuses (queued, preparing, ready, review).',
     include_skipped: "true also lists jobs ranked skip. Default false.",
     limit: `How many jobs to show, 1-30. Default ${DEFAULT_LIMIT}.`,
   };

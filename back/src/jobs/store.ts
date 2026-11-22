@@ -17,7 +17,14 @@ export type JobInput = {
   postedAt?: Date | null;
 };
 
-const DEFAULT_STATUSES: JobStatus[] = ["queued", "preparing", "ready"];
+// `review` is a job the quality gate flagged, so a person still has to look at
+// it: it belongs in the default open list rather than out of sight.
+const DEFAULT_STATUSES: JobStatus[] = [
+  "queued",
+  "preparing",
+  "ready",
+  "review",
+];
 
 /** Lower sorts first. Unranked sits between "maybe" and "skip". */
 const RANK_ORDER: Record<JobRank, number> = {
@@ -33,8 +40,8 @@ function isUniqueViolation(err: unknown): boolean {
 
 /**
  * Stores one posting, deduped on (source, externalId). A duplicate keeps the
- * status, rank and ping timestamps the existing row earned; only the posting
- * text is refreshed, because the site can edit it after we first saw it.
+ * status, rank and timestamps the existing row earned; only the posting text is
+ * refreshed, because the site can edit it after we first saw it.
  */
 export async function saveJob(
   input: JobInput,
@@ -126,7 +133,8 @@ function ambiguous(ref: string, jobs: Job[]): Error {
   );
 }
 
-async function resolveJob(ref: string): Promise<Job> {
+/** Resolves a full id, an external id, or an id prefix of at least 6 characters. */
+export async function resolveJobRef(ref: string): Promise<Job> {
   const byId = await prisma.job.findUnique({ where: { id: ref } });
   if (byId) return byId;
 
@@ -148,7 +156,7 @@ async function resolveJob(ref: string): Promise<Job> {
 }
 
 export async function markJob(ref: string, status: JobStatus): Promise<Job> {
-  const job = await resolveJob(ref);
+  const job = await resolveJobRef(ref);
   return await prisma.job.update({
     where: { id: job.id },
     data: { status },

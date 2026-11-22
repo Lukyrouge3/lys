@@ -10,9 +10,15 @@ import { getAgent } from "@/config/agentConfig.ts";
 import { getSession } from "@/chat/discord/session.ts";
 import { DiscordReply } from "@/chat/discord/reply.ts";
 import { handleInteraction } from "@/chat/discord/interaction.ts";
+import {
+  handleProposalInteraction,
+  isSortButton,
+  reportProposalError,
+} from "@/chat/discord/proposal.ts";
 import { startMailNotifications } from "@/chat/discord/mail.ts";
-import { dmOwner } from "@/chat/discord/notify.ts";
+import { createKeyedQueue } from "@/chat/discord/queue.ts";
 import { startJobServer } from "@/jobs/server.ts";
+import { startScheduler } from "@/scheduler/start.ts";
 
 export async function discordChat(
   agentName: string,
@@ -48,20 +54,20 @@ export async function discordChat(
     ],
   });
 
-  // Handle one message at a time so turns never interleave
-  let queue = Promise.resolve();
+  // One turn at a time per channel/thread; different conversations run
+  // concurrently. A click uses the same chain so it cannot overtake a turn.
+  const queue = createKeyedQueue();
 
   client.on(Events.MessageCreate, (message) => {
     if (message.author.bot) return;
     if (message.author.id !== ownerId) return;
     if (!message.inGuild() || !message.channel.isTextBased()) return;
 
-    queue = queue.then(() => handle(message)).catch((err) => {
+    const channel = message.channel;
+    queue.run(channel.id, () => handle(message)).catch((err) => {
       logger.error(`Failed to handle Discord message: ${err}`);
-      if (message.channel.isSendable()) {
-        message.channel.send("Something went wrong, check the logs.").catch(
-          () => {},
-        );
+      if (channel.isSendable()) {
+        channel.send("Something went wrong, check the logs.").catch(() => {});
       }
     });
   });
@@ -69,34 +75,56 @@ export async function discordChat(
   client.on(Events.InteractionCreate, (interaction) => {
     if (!interaction.isButton()) return;
     if (interaction.user.id !== ownerId) return;
+
+    // The sorting proposal lives in the owner's DMs, which have no guild
+    // channel: it is routed before the guild guard below. The handler checks
+    // the owner again, and the same per-channel chain serialises the clicks.
+    if (isSortButton(interaction.customId)) {
+      queue.run(
+        interaction.channelId,
+        () => handleProposalInteraction(interaction),
+      ).catch((err) => {
+        logger.error(`Failed to handle Discord sorting button: ${err}`);
+        reportProposalError(interaction).catch(() => {});
+      });
+      return;
+    }
+
     const channel = interaction.channel;
     if (!interaction.inGuild() || !channel?.isTextBased()) return;
     if (channel.isDMBased()) return;
 
-    // Same queue as messages: a click can start a run too
-    queue = queue.then(() =>
+    // Same chain as messages: a click can start a run too
+    queue.run(channel.id, () =>
       handleInteraction(interaction, channel, {
         agent,
         messageCount: options?.messageCount,
-      })
-    ).catch((err) => {
-      logger.error(`Failed to handle Discord interaction: ${err}`);
-      if (interaction.isRepliable()) {
-        interaction.reply({
-          content: "Something went wrong, check the logs.",
-          flags: MessageFlags.Ephemeral,
-        }).catch(() => {});
-      }
-    });
+      })).catch((err) => {
+        logger.error(`Failed to handle Discord interaction: ${err}`);
+        if (interaction.isRepliable()) {
+          interaction.reply({
+            content: "Something went wrong, check the logs.",
+            flags: MessageFlags.Ephemeral,
+          }).catch(() => {});
+        }
+      });
   });
 
   client.once(Events.ClientReady, (ready) => {
     logger.info(`Logged in to Discord as ${ready.user.tag}`);
     startMailNotifications(client);
-    // The extension posts here; the pings go out as DMs like the mail notices
-    startJobServer({ notify: (text) => dmOwner(client, text) }).catch((err) => {
+    startJobServer().catch((err) => {
       logger.error(`Jobs API failed to start: ${err}`);
     });
+
+    const stopScheduler = startScheduler(client);
+    // discord.js v14 has no "client destroyed" event; wrapping destroy() is
+    // the best-effort way to stop the daily timers when the client goes away.
+    const destroy = client.destroy.bind(client);
+    client.destroy = () => {
+      stopScheduler();
+      return destroy();
+    };
   });
 
   await client.login(token);

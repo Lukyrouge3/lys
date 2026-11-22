@@ -1,57 +1,55 @@
-// One job, three guarded steps: rank it, ping Discord when it is worth it, and
-// put a file in the Nextcloud inbox. Each step is independent, so a broken
-// ranker or a full inbox still lets the others happen, and nothing thrown here
-// ever reaches the queue.
+// One job, two guarded steps: rank it and put a file in the Nextcloud inbox.
+// Each step is independent, so a broken ranker or a full inbox still lets the
+// other happen, and nothing thrown here ever reaches the queue. The owner hears
+// about the good ones in the morning message, not in a Discord DM per click.
 import type { Job } from "@/generated/prisma/client.ts";
-import { formatJobNotice } from "@/chat/discord/notify.ts";
 import {
   type InboxResult,
   jobInboxPath,
   writeJobToInbox,
 } from "@/jobs/inbox.ts";
 import { clip, shortJobId } from "@/jobs/log.ts";
+import { prepCapReached, shouldPrepare } from "@/jobs/prep.ts";
 import { rankAndStore } from "@/jobs/rank.ts";
-import { markInboxWritten, markNotified } from "@/jobs/store.ts";
+import { markInboxWritten } from "@/jobs/store.ts";
 import { logger } from "@/utils/logger.ts";
 import { withTimeout } from "@/utils/timeout.ts";
 
 /** A Nextcloud write that takes longer than this is treated as failed. */
 export const INBOX_TIMEOUT_MS = 20_000;
 
-/** A Discord ping that takes longer than this is treated as failed. */
-export const NOTIFY_TIMEOUT_MS = 15_000;
-
 export type ProcessDeps = {
   /** Ranks and stores the job; the real one never throws on a ranking failure. */
   rank: typeof rankAndStore;
-  notify: (text: string) => Promise<void>;
   writeInbox: (job: Job) => Promise<InboxResult>;
   /** Overrides INBOX_TIMEOUT_MS so a test does not wait 20 seconds. */
   inboxTimeoutMs: number;
+  /**
+   * Whether document preparation will run for this job. True means the Input
+   * bridge file is redundant: prep delivers job.md into the application folder.
+   * False keeps the old bridge behaviour.
+   */
+  willPrepare: (job: Job) => Promise<boolean>;
 };
 
-/** Called when a job is processed with no notifier wired (e.g. from a tool). */
-function noNotifier(): Promise<void> {
-  return Promise.reject(new Error("no Discord notifier is configured"));
-}
-
 /**
- * Processes one stored job. Idempotent: the notified and inbox timestamps are
- * only stamped after the side effect happened, so a second run pings and writes
- * nothing while a failed step is retried by the next run.
+ * Processes one stored job. Idempotent: the inbox timestamp is only stamped
+ * after the write happened, so a second run writes nothing while a failed write
+ * is retried by the next run.
  */
 export async function processJob(
   jobId: string,
   deps: Partial<ProcessDeps> = {},
 ): Promise<Job | null> {
   const rank = deps.rank ?? rankAndStore;
-  const notify = deps.notify ?? noNotifier;
   const writeInbox = deps.writeInbox ?? writeJobToInbox;
   const inboxTimeoutMs = deps.inboxTimeoutMs ?? INBOX_TIMEOUT_MS;
+  const willPrepare = deps.willPrepare ??
+    (async (candidate: Job) =>
+      shouldPrepare(candidate) && !(await prepCapReached()));
 
   const id = shortJobId(jobId);
   const started = performance.now();
-  logger.info(`jobs: processing ${id}`);
 
   let job: Job;
   try {
@@ -62,34 +60,26 @@ export async function processJob(
     return null;
   }
 
+  logger.info(`jobs: processing ${id} ${job.url}`);
+
   if (job.rank === null) {
-    logger.info(`jobs: ranked ${id} -> none (ranker gave no usable answer)`);
+    logger.info(
+      `jobs: ranked ${id} -> none (ranker gave no usable answer) ${job.url}`,
+    );
   } else {
     logger.info(
       `jobs: ranked ${id} -> ${job.rank} (${
         clip(job.rankReason ?? "", 140) || "no reason given"
-      })`,
+      }) ${job.url}`,
     );
   }
 
-  // A null rank (the ranker failed) gets neither, so a retry can do both
-  if (job.rank === "apply" && job.notifiedAt === null) {
-    try {
-      await withTimeout(
-        notify(formatJobNotice(job)),
-        NOTIFY_TIMEOUT_MS,
-        `Pinging for job ${job.id}`,
-      );
-      job = await markNotified(job.id);
-      logger.info(`jobs: ping sent ${id}`);
-    } catch (err) {
-      logger.warn(`jobs: ping failed ${id}: ${err}`);
-    }
-  }
+  const prep = job.rank !== null && job.rank !== "skip" &&
+    await willPrepare(job);
 
   if (
     job.rank !== null && job.rank !== "skip" &&
-    job.inboxWrittenAt === null
+    !prep && job.inboxWrittenAt === null
   ) {
     const path = jobInboxPath(job);
     try {
@@ -108,14 +98,16 @@ export async function processJob(
     } catch (err) {
       logger.warn(`jobs: inbox ${id} -> failed: ${err}`);
     }
+  } else if (prep) {
+    logger.info(
+      `jobs: inbox ${id} -> skipped, prep will deliver job.md ${job.url}`,
+    );
   }
 
   logger.info(
     `jobs: done ${id} in ${Math.round(performance.now() - started)} ms (rank=${
       job.rank ?? "none"
-    }, pinged=${job.notifiedAt !== null}, inbox=${
-      job.inboxWrittenAt !== null
-    })`,
+    }, inbox=${job.inboxWrittenAt !== null}) ${job.url}`,
   );
   return job;
 }

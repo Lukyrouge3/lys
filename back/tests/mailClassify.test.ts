@@ -1,7 +1,9 @@
 import { assertEquals } from "@std/assert";
 import OpenAI from "@openai/openai";
 import {
+  askAgent,
   classifyDocumentWith,
+  classifyMail,
   classifyPrompt,
   classifyRequest,
   classifyWith,
@@ -10,6 +12,8 @@ import {
   parseCategory,
   parseImportance,
   parseVerdict,
+  resetClassifyStateForTests,
+  setClassifyClockForTests,
 } from "@/mail/classify.ts";
 import type { MailEvent } from "@/mail/watcher.ts";
 
@@ -197,4 +201,75 @@ Deno.test("a document answer without a category becomes other", async () => {
     await classifyDocumentWith(openai, "test-model", document),
     "other",
   );
+});
+
+Deno.test("a negation in the first line does not invert the verdict", () => {
+  assertEquals(parseImportance("not noise, it is important"), "important");
+  assertEquals(parseImportance("not important, just normal"), "normal");
+  assertEquals(
+    parseVerdict("not noise, it is important"),
+    { importance: "important", topic: "" },
+  );
+  assertEquals(parseCategory("not an invoice, a receipt"), "receipt");
+  assertEquals(parseCategory("not medical, a travel booking"), "travel");
+});
+
+Deno.test("only the first line is the verdict", () => {
+  // Line 2 is a topic slot, not a second chance at the label.
+  assertEquals(parseImportance("noise\nimportant"), "noise");
+  assertEquals(parseImportance("not noise\nimportant"), "normal");
+  assertEquals(parseImportance("no idea\nimportant"), "normal");
+});
+
+function failingAsk(): typeof askAgent {
+  return (() =>
+    Promise.reject(new Error("provider down"))) as unknown as typeof askAgent;
+}
+
+Deno.test("a transient classifier failure is retried once", async () => {
+  resetClassifyStateForTests();
+  let calls = 0;
+  const ask = ((
+    _trigger: string,
+    _request: (model: string) => unknown,
+    parse: (answer: string) => unknown,
+  ) => {
+    calls++;
+    if (calls === 1) return Promise.reject(new Error("provider down"));
+    return Promise.resolve(parse("important\nlunch on Friday"));
+  }) as unknown as typeof askAgent;
+
+  assertEquals(
+    await classifyMail(mail, ask),
+    { importance: "important", topic: "lunch on Friday" },
+  );
+  assertEquals(calls, 2);
+});
+
+Deno.test("a persistent failure fails open once, then rate-limits", async () => {
+  resetClassifyStateForTests();
+  let now = 1_000_000;
+  setClassifyClockForTests(() => now);
+
+  try {
+    assertEquals(
+      await classifyMail(mail, failingAsk()),
+      { importance: "important", topic: "could not be classified" },
+    );
+
+    // Second outage in the same window must not become a second alarm.
+    assertEquals(
+      await classifyMail(mail, failingAsk()),
+      { importance: "normal", topic: "" },
+    );
+
+    now += 15 * 60_000;
+    assertEquals(
+      await classifyMail(mail, failingAsk()),
+      { importance: "important", topic: "could not be classified" },
+    );
+  } finally {
+    setClassifyClockForTests(null);
+    resetClassifyStateForTests();
+  }
 });

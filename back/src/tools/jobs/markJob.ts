@@ -1,6 +1,12 @@
 import type { Tool, ToolContext } from "@/tools/tool.ts";
-import type { JobStatus } from "@/generated/prisma/client.ts";
+import type { Job, JobStatus } from "@/generated/prisma/client.ts";
 import { markJob } from "@/jobs/store.ts";
+import {
+  statusToTracker,
+  trackerDate,
+  upsertTrackerRow,
+} from "@/prep/tracker.ts";
+import { logger } from "@/utils/logger.ts";
 
 const MARKABLE: JobStatus[] = [
   "applied",
@@ -54,6 +60,10 @@ export class MarkJobTool implements Tool {
   requiredArguments = ["job", "status"];
   requireApproval = false;
 
+  constructor(
+    private readonly deps: { tracker?: typeof upsertTrackerRow } = {},
+  ) {}
+
   async run(
     _context: ToolContext,
     args: Record<string, unknown>,
@@ -62,6 +72,37 @@ export class MarkJobTool implements Tool {
     const ref = parseJobRef(args.job);
 
     const job = await markJob(ref, status);
-    return `Marked "${job.title}" at ${job.company} as ${job.status}.`;
+    const trackerNote = await syncTracker(job, this.deps.tracker);
+    return `Marked "${job.title}" at ${job.company} as ${job.status}.${trackerNote}`;
+  }
+}
+
+/**
+ * Best-effort tracker update after a manual status change. A missing row or a
+ * broken tracker must never turn a recorded status into an error.
+ */
+async function syncTracker(
+  job: Job,
+  tracker: typeof upsertTrackerRow = upsertTrackerRow,
+): Promise<string> {
+  if (!job.prepFolder) return "";
+
+  const mapped = statusToTracker(job.status);
+  try {
+    await tracker({
+      applied: trackerDate(job.preparedAt ?? new Date()),
+      company: job.company,
+      role: job.title,
+      status: mapped.status,
+      folder: job.prepFolder,
+      next: mapped.next,
+    });
+    return "";
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      `jobs: tracker not updated for ${job.id} (${job.company}): ${reason}`,
+    );
+    return ` (tracker not updated: ${reason})`;
   }
 }

@@ -1,6 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
 import type { Job } from "@/generated/prisma/client.ts";
-import { formatJobNotice } from "@/chat/discord/notify.ts";
 import { formatJobMarkdown, jobSlug } from "@/jobs/inbox.ts";
 
 function job(overrides: Partial<Job> = {}): Job {
@@ -28,43 +27,6 @@ function job(overrides: Partial<Job> = {}): Job {
     ...overrides,
   };
 }
-
-Deno.test("a job notice says what, where and why", () => {
-  assertEquals(
-    formatJobNotice(job()),
-    "💼 Worth a look: **Junior Developer** at Acme (Geneva)\n" +
-      "Strong match.\n<https://example.com/jobs/1>",
-  );
-});
-
-Deno.test("a job without a location has no empty parentheses", () => {
-  const notice = formatJobNotice(job({ location: null }));
-  assert(notice.includes("at Acme\nStrong match."));
-  assertEquals(notice.includes("()"), false);
-});
-
-Deno.test("an empty reason takes no line of its own", () => {
-  const notice = formatJobNotice(job({ rankReason: null }));
-  assertEquals(
-    notice,
-    "💼 Worth a look: **Junior Developer** at Acme (Geneva)\n" +
-      "<https://example.com/jobs/1>",
-  );
-  assertEquals(notice.split("\n").length, 2);
-});
-
-Deno.test("the url is wrapped so Discord does not unfurl it", () => {
-  const notice = formatJobNotice(job());
-  assert(notice.endsWith("<https://example.com/jobs/1>"));
-});
-
-Deno.test("a very long title is cut on a word", () => {
-  const notice = formatJobNotice(job({ title: "mot ".repeat(200) }));
-  const title = notice.split("**")[1];
-
-  assertEquals(title.length, 200);
-  assert(title.endsWith("mot…"));
-});
 
 const marker = "2026-11-22T10:00:00Z";
 

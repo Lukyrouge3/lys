@@ -14,10 +14,15 @@
     "mail:check": "deno run -A --env src/mail/check.ts",
     "mail:watch": "deno run -A --env src/mail/watch.ts",
     "mail:backfill": "deno run -A --env src/mail/backfill.ts",
-    "jobs:token": "deno run -A --env src/jobs/token.ts"
+    "jobs:token": "deno run -A --env src/jobs/token.ts",
+    "prep:upload-factbank": "deno run -A --env src/prep/uploadFactBank.ts",
+    "prep:smoke": "deno run -A src/prep/smoke.ts"
   },
   "fmt": {
-    "exclude": ["prisma/seed.example.json"]
+    "exclude": ["prisma/seed.example.json", "assets/**"]
+  },
+  "lint": {
+    "exclude": ["assets/**"]
   },
   "imports": {
     "@openai/openai": "jsr:@openai/openai@^7.2.0",
@@ -29,6 +34,7 @@
     "discord.js": "npm:discord.js@^14.27.0",
     "ical.js": "npm:ical.js@^2.2.1",
     "imapflow": "npm:imapflow@^2.12.1",
+    "nodemailer/lib/mail-composer": "npm:nodemailer@^6.9.16/lib/mail-composer/index.js",
     "pg": "npm:pg@^8.23.1",
     "postal-mime": "npm:postal-mime@^4.2.1",
     "prisma": "npm:prisma@^7.10.1",
