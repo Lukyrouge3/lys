@@ -206,6 +206,18 @@ Deno.test("an unparsable writer gets one retry and then throws", async () => {
   assertEquals(compiles, []);
 });
 
+Deno.test("an empty writer answer names the thinking budget", async () => {
+  const { deps, calls } = makeDeps([""]);
+
+  await assertRejects(
+    () => prepareApplication(JOB, deps),
+    Error,
+    "PREP_THINKING",
+  );
+
+  assertEquals(calls.map((call) => call.trigger), ["prep:write"]);
+});
+
 Deno.test("the total wall-clock budget rejects", async () => {
   const hang: PrepLlm = <T>(
     _trigger: string,

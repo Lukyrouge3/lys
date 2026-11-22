@@ -102,9 +102,12 @@ export function writeRequest(
         ].join("\n"),
       },
     ],
-    // The configured model is a reasoner: a small budget is spent thinking and
-    // comes back empty. Two full Typst documents need room on top of that.
-    max_tokens: 16000,
+    // The model is a reasoner: without a thinking cap the whole budget is spent
+    // before any text is written. Measured on the Toreagle job with
+    // `(none)` (see PREP_THINKING): a complete answer used 4132-4914 output
+    // tokens, so 12000 leaves room for one repair round without the model
+    // thinking the budget away.
+    max_tokens: 12000,
     temperature: 0,
   };
 }

@@ -65,6 +65,10 @@ services:
       - "127.0.0.1:8787:8787"
     environment:
       JOBS_HOST: "0.0.0.0"
+      # Document prep runs on its own agent (see the Agent table) so a stronger model can write the CV and letter while mail stays on the cheap one.
+      PREP_AGENT: "prep"
+      # The job ranker also uses the stronger agent: one call per click, and judging fit needs it.
+      JOB_RANKER_AGENT: "prep"
     restart: unless-stopped
     depends_on:
       postgres:

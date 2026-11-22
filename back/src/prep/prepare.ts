@@ -33,6 +33,23 @@ const UNPARSABLE_ERROR =
   "The model gave an unusable answer for application preparation: expected " +
   '"language: fr" or "language: en" followed by the notes.md, cv.typ and cover.typ blocks.';
 
+const EMPTY_WRITE_ERROR =
+  "The model returned an empty answer for application preparation: it probably " +
+  "spent its token budget thinking; see PREP_THINKING.";
+
+/**
+ * The thinking level for both prep calls. Measured against claude-haiku-5-5
+ * through CLIProxyAPI on the Toreagle job: with the provider default, a
+ * 16000-token write call spent 15130-16000 tokens on reasoning and returned an
+ * empty or truncated answer; `(low)`, `(medium)` and a numeric budget behaved
+ * the same. `(none)` disabled thinking (0 reasoning tokens), answered in
+ * 4132-4914 output tokens and parsed. An empty value turns the suffix off.
+ */
+function prepThinking(): string {
+  const raw = Deno.env.get("PREP_THINKING");
+  return raw === undefined ? "none" : raw.trim();
+}
+
 /** The seam the workflow runs through, with real implementations by default. */
 export function defaultDeps(): PrepDeps {
   return {
@@ -46,6 +63,7 @@ export function defaultDeps(): PrepDeps {
         build,
         parse,
         Deno.env.get("PREP_AGENT")?.trim() || "lys",
+        prepThinking(),
       ),
     compile: compileTypst,
     pageCount: pdfPageCount,
@@ -164,12 +182,20 @@ async function askWrite(
   deps: PrepDeps,
   previousProblems?: string[],
 ): Promise<WriteAnswer | null> {
-  return await deps.llm(
+  let empty = false;
+  const answer = await deps.llm(
     "prep:write",
     (model) =>
       writeRequest(model, job, facts.text, templates, previousProblems),
-    parseWrite,
+    (text) => {
+      empty = text.trim().length === 0;
+      return parseWrite(text);
+    },
   );
+  // An empty answer is not a format problem the model can be talked out of: it
+  // spent the whole output budget before writing anything.
+  if (!answer && empty) throw new Error(EMPTY_WRITE_ERROR);
+  return answer;
 }
 
 type CheckedPair = {

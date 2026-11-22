@@ -46,7 +46,7 @@ Deno.test("the write request demands the exact delimiter format", () => {
   assertStringIncludes(text, "===== cover.typ =====");
   assertStringIncludes(text, "Change only the CONTENT");
   assertStringIncludes(text, "keep the imports");
-  assertEquals(request.max_tokens, 16000);
+  assertEquals(request.max_tokens, 12000);
   assertEquals(request.temperature, 0);
   assertEquals(request.model, "test-model");
 });

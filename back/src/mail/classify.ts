@@ -2,6 +2,7 @@ import OpenAI from "@openai/openai";
 import prisma from "@/db.ts";
 import { getAgent } from "@/config/agentConfig.ts";
 import { getOpenAIClient } from "@/llm/provider.ts";
+import { withThinking } from "@/llm/thinking.ts";
 import type { Prisma } from "@/generated/prisma/client.ts";
 import type { MailEvent } from "@/mail/watcher.ts";
 import { logger } from "@/utils/logger.ts";
@@ -302,12 +303,14 @@ export async function askAgent<T>(
   request: (model: string) => ChatRequest,
   parse: (answer: string) => T,
   agentName?: string,
+  thinking?: string,
 ): Promise<T> {
   const agent = await getAgent(
     agentName ?? Deno.env.get("MAIL_CLASSIFIER_AGENT") ?? "lys",
   );
   const openai = await getOpenAIClient(agent.provider);
-  const payload = request(agent.model);
+  const model = withThinking(agent.model, thinking);
+  const payload = request(model);
   const start = performance.now();
 
   try {
@@ -318,7 +321,7 @@ export async function askAgent<T>(
     await prisma.llmCall.create({
       data: {
         providerId: agent.providerId,
-        model: agent.model,
+        model,
         trigger,
         status: "Ok",
         inputTokens: response.usage?.prompt_tokens,
@@ -334,7 +337,7 @@ export async function askAgent<T>(
     await prisma.llmCall.create({
       data: {
         providerId: agent.providerId,
-        model: agent.model,
+        model,
         trigger,
         status: "Error",
         latencyMs: Math.round(performance.now() - start),
@@ -368,6 +371,11 @@ export function resetClassifyStateForTests(): void {
   clock = Date.now;
 }
 
+/** Thinking level for the mail calls; unset keeps the provider default. */
+function mailThinking(): string | undefined {
+  return Deno.env.get("MAIL_THINKING")?.trim() || undefined;
+}
+
 export async function classifyMail(
   mail: MailEvent,
   ask: typeof askAgent = askAgent,
@@ -379,6 +387,8 @@ export async function classifyMail(
         "mail:classify",
         (model) => classifyRequest(model, mail),
         parseVerdict,
+        undefined,
+        mailThinking(),
       );
     } catch (err) {
       failure = err;
@@ -412,6 +422,8 @@ export async function classifyDocument(
       "mail:document",
       (model) => documentRequest(model, input),
       parseCategory,
+      undefined,
+      mailThinking(),
     );
   } catch {
     return "other";

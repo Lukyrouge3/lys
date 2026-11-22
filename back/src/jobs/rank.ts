@@ -57,11 +57,10 @@ export function rankRequest(
         ].join("\n"),
       },
     ],
-    // A reasoning model spends tokens thinking before it answers, and ranking
-    // needs more of that than the mail classifier: 512 was still all spent on
-    // thinking for a real posting, which came back with an empty answer. The
-    // answer itself is two short lines, so the extra budget costs nothing on
-    // the calls where the model answers quickly.
+    // The thinking cap comes from RANK_THINKING (default "low"), which the proxy
+    // applies from the model-name suffix. Measured through CLIProxyAPI with
+    // claude-haiku-5-5: a real posting answered in 298 tokens (244 of them
+    // reasoning), so 2048 still leaves room for the two-line answer.
     max_tokens: 2048,
     temperature: 0,
   };
@@ -93,6 +92,12 @@ export function parseRank(
   return { rank: value, reason };
 }
 
+/** The thinking level for ranking; unset means the provider default. */
+function rankThinking(): string {
+  const raw = Deno.env.get("RANK_THINKING");
+  return raw === undefined ? "low" : raw.trim();
+}
+
 /** Fail-soft: a broken ranker leaves the job unranked instead of dropping it. */
 export async function rankJob(
   job: Pick<Job, "title" | "company" | "location" | "description">,
@@ -114,6 +119,7 @@ export async function rankJob(
         return parsed;
       },
       Deno.env.get("JOB_RANKER_AGENT") ?? "lys",
+      rankThinking(),
     );
     // askAgent hands back only the parsed answer, so the token counts stay in
     // the llmCall row; the round trip is what tells a slow ranker from a fast one
