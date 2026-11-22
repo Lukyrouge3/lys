@@ -29,11 +29,25 @@ current tab:
 - `url`: `https://www.linkedin.com/jobs/view/<id>/`
 - `title`, `company`, `location`, `description`, `postedAt`
 
-The extension prefers the page's JSON-LD `JobPosting` block and falls back to
-CSS selectors in the rendered job detail pane. Descriptions are converted to
-plain text, trimmed, and capped at 20,000 characters. If the title or
-description cannot be found, the extension refuses to send and reports which
-field is missing.
+The extension prefers the page's JSON-LD `JobPosting` block. When there is none
+(the usual case on LinkedIn's current job pages), it finds the description by
+anchoring on the heading that sits directly above it — a leaf element whose text
+is one of the known labels such as **About the job**, **À propos de l'offre
+d'emploi**, **Über die Stelle**, **Sobre a vaga** — then walks up to the nearest
+ancestor that is clearly longer than the heading (more than 100 characters, at
+most 8 levels). LinkedIn's hashed CSS class names are not used for this. The
+title comes from the first `h1`, then from `document.title`
+(`<Job title> |
+<Company> | LinkedIn`, with any `(3)` notification prefix
+removed); the company comes from `document.title`, then from the first
+`/company/` link. Localized heading wording is matched case-insensitively, and a
+typographic apostrophe (`’`) is treated like `'`.
+
+Descriptions are converted to plain text, trimmed, and capped at 20,000
+characters. If the title or description cannot be found, the extension refuses
+to send and reports which field is missing; for a missing description it tells
+you to open the job on its own `linkedin.com/jobs/view/…` page. Location is only
+reported when JSON-LD provides it.
 
 The background service worker performs the `POST {endpoint}/jobs` request, so
 the LinkedIn page never has to make a cross-origin or mixed-content request. The
@@ -49,10 +63,15 @@ token is read from `chrome.storage.local` and is never logged.
 
 ## When extraction breaks
 
-LinkedIn changes its markup often. The fallback selectors are in **one place**:
-`JOB_DETAIL_SELECTORS` at the top of `extract.js`. Inspect the job detail pane
-in DevTools, update the alternatives there, and reload the extension. The
-JSON-LD path usually keeps working even when class names change.
+LinkedIn uses hashed class names, so extraction does not rely on them. The
+description is found by locating the visible heading — **About the job** and its
+translations — and taking its nearest ancestor that holds the text. Those
+headings live in **one place**, `JOB_DESCRIPTION_HEADINGS` at the top of
+`extract.js`; add a language there if the UI is in one that is missing, then
+reload the extension. Title and company come from the page `<h1>` and the
+`<title>` (`Job title | Company | LinkedIn`). The old class selectors in
+`JOB_DETAIL_SELECTORS` are a last resort only. If it still fails, open the job
+on its own page (`linkedin.com/jobs/view/<id>/`) and try again.
 
 ## Tests
 

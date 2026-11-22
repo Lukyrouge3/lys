@@ -9,8 +9,26 @@
 (function (root) {
   "use strict";
 
-  // LinkedIn changes these class names regularly. When extraction breaks, fix
-  // the selectors here. JSON-LD is tried first; these are only the fallbacks.
+  // Heading wording that LinkedIn puts directly above a job description, in
+  // the languages we have seen. Matching is case-insensitive, anchored at the
+  // start of a leaf element's trimmed text, and tolerates a trailing colon.
+  // THIS IS THE ONE PLACE TO EXTEND when description extraction stops working:
+  // add the new wording here, then reload the extension.
+  const JOB_DESCRIPTION_HEADINGS = Object.freeze([
+    "About the job",
+    "About the role",
+    "Job description",
+    "À propos de l'offre d'emploi",
+    "À propos de l’offre",
+    "Description du poste",
+    "Über die Stelle",
+    "Acerca del empleo",
+    "Informazioni sull'offerta di lavoro",
+    "Sobre a vaga",
+  ]);
+
+  // LinkedIn rotates its CSS class names, so the selectors below are only the
+  // LAST resort: JSON-LD first, then the heading-anchored DOM walk, then these.
   const JOB_DETAIL_SELECTORS = Object.freeze({
     title: Object.freeze([
       ".job-details-jobs-unified-top-card__job-title",
@@ -24,6 +42,9 @@
       ".jobs-unified-top-card__company-name",
       ".job-details-jobs-unified-top-card__company-name a",
     ]),
+    // Kept for reference only: location is reported when JSON-LD provides it
+    // and is null otherwise, because guessing it from the header text was not
+    // reliable.
     location: Object.freeze([
       ".job-details-jobs-unified-top-card__primary-description-container .tvm__text--low-emphasis",
       ".job-details-jobs-unified-top-card__primary-description-container",
@@ -40,6 +61,23 @@
   });
 
   const MAX_DESCRIPTION_LENGTH = 20000;
+
+  // A container much bigger than this is the whole pane or the page, not the
+  // description; keep only its head.
+  const MAX_CONTAINER_SCAN_LENGTH = 50000;
+
+  // A heading is a short label, never a paragraph.
+  const MAX_HEADING_LENGTH = 120;
+
+  // How far up from the heading we are willing to walk before giving up.
+  const MAX_HEADING_ANCESTOR_STEPS = 8;
+
+  // The description container must be this much longer than the heading itself
+  // (the heading usually sits inside one or two same-size wrappers first).
+  const MIN_DESCRIPTION_GROWTH = 100;
+
+  const DESCRIPTION_HELP =
+    "Could not find the job description. Open the job on its own page (linkedin.com/jobs/view/…) and try again.";
 
   const NAMED_ENTITIES = Object.freeze({
     amp: "&",
@@ -314,11 +352,17 @@
     if (!description) missing.push("description");
 
     if (missing.length > 0) {
-      return {
-        ok: false,
-        error: `Could not find ${missing.join(" and ")} on this page.`,
-        missing,
-      };
+      let error;
+      if (missing.includes("description")) {
+        error = missing.length > 1
+          ? `Could not find ${
+            missing.join(" and ")
+          } on this page. ${DESCRIPTION_HELP}`
+          : DESCRIPTION_HELP;
+      } else {
+        error = `Could not find ${missing.join(" and ")} on this page.`;
+      }
+      return { ok: false, error, missing };
     }
 
     return {
@@ -379,6 +423,115 @@
     return null;
   }
 
+  function elementChildren(element) {
+    if (!element) return [];
+
+    let children;
+    try {
+      children = element.children;
+    } catch {
+      return [];
+    }
+    if (!children) return [];
+
+    try {
+      return Array.from(children);
+    } catch {
+      return [];
+    }
+  }
+
+  function tagNameOf(element) {
+    if (!element) return "";
+    return asString(element.tagName || element.nodeName || "").toUpperCase();
+  }
+
+  const BLOCK_TAG_NAMES = new Set([
+    "ADDRESS",
+    "ARTICLE",
+    "ASIDE",
+    "BLOCKQUOTE",
+    "DD",
+    "DIV",
+    "DL",
+    "DT",
+    "FIELDSET",
+    "FIGCAPTION",
+    "FIGURE",
+    "FOOTER",
+    "FORM",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "HEADER",
+    "HR",
+    "LI",
+    "MAIN",
+    "NAV",
+    "OL",
+    "P",
+    "PRE",
+    "SECTION",
+    "TABLE",
+    "TBODY",
+    "TD",
+    "TFOOT",
+    "TH",
+    "THEAD",
+    "TR",
+    "UL",
+  ]);
+
+  const SKIPPED_TAG_NAMES = new Set([
+    "SCRIPT",
+    "STYLE",
+    "NOSCRIPT",
+    "TEMPLATE",
+  ]);
+
+  /**
+   * Text of a subtree with block boundaries preserved, used when the node has
+   * no usable innerText (fake DOMs, detached or hidden nodes).
+   */
+  function blockAwareText(element) {
+    if (!element) return "";
+
+    const tag = tagNameOf(element);
+    if (tag === "BR") return "\n";
+    if (SKIPPED_TAG_NAMES.has(tag)) return "";
+
+    const children = elementChildren(element);
+    if (children.length === 0) {
+      try {
+        return typeof element.textContent === "string"
+          ? element.textContent
+          : "";
+      } catch {
+        return "";
+      }
+    }
+
+    let text = "";
+    for (const child of children) {
+      const childTag = tagNameOf(child);
+      if (childTag === "BR") {
+        text += "\n";
+        continue;
+      }
+      const childText = blockAwareText(child);
+      if (!childText) continue;
+      if (BLOCK_TAG_NAMES.has(childTag)) {
+        text += `\n\n${childText}\n\n`;
+      } else {
+        text += childText;
+      }
+    }
+    return text;
+  }
+
   function readElementText(element) {
     if (!element) return "";
 
@@ -388,11 +541,61 @@
         : "";
       if (innerText.trim()) return innerText;
     } catch {
+      // Fall through to the subtree walk.
+    }
+
+    try {
+      const text = blockAwareText(element);
+      if (text.trim()) return text;
+    } catch {
       // Fall through to textContent.
     }
 
     try {
       return typeof element.textContent === "string" ? element.textContent : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function documentRoot(doc) {
+    if (!doc) return null;
+    try {
+      return doc.body || doc.documentElement || doc;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Depth-first, document-order walk. Return true from visit to stop. */
+  function eachElement(root, visit) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const element = stack.pop();
+      if (!element) continue;
+      if (visit(element) === true) return true;
+
+      const children = elementChildren(element);
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        stack.push(children[index]);
+      }
+    }
+    return false;
+  }
+
+  function readAttribute(element, name) {
+    if (!element) return "";
+
+    try {
+      if (typeof element.getAttribute === "function") {
+        return asString(element.getAttribute(name));
+      }
+    } catch {
+      return "";
+    }
+
+    try {
+      return asString(element[name]);
     } catch {
       return "";
     }
@@ -425,17 +628,172 @@
     }
   }
 
-  function titleFromDocumentTitle(title) {
-    const cleaned = cleanInline(title)
-      .replace(/\s*[|\-\u2013]\s*LinkedIn\s*$/i, "")
-      .trim();
-    if (/^(linkedin|jobs|linkedin jobs)$/i.test(cleaned)) return "";
-    return cleaned;
+  function normalizeHeadingText(value) {
+    return asString(value)
+      .replace(/[\u2018\u2019\u02bc]/g, "'")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function isDescriptionHeading(value) {
+    const text = normalizeHeadingText(value).replace(/[:\s]+$/, "");
+    if (!text || text.length > MAX_HEADING_LENGTH) return false;
+
+    return JOB_DESCRIPTION_HEADINGS.some((heading) => {
+      const label = normalizeHeadingText(heading).replace(/[:\s]+$/, "");
+      return text === label || text.startsWith(`${label} `);
+    });
   }
 
   /**
-   * Extract from the rendered page. JSON-LD is preferred, then the selector
-   * fallbacks above, then document.title for the title only.
+   * Split document.title into title and company. LinkedIn job pages look like
+   * "<Job title> | <Company> | LinkedIn", sometimes prefixed with a
+   * notification counter such as "(3) ".
+   */
+  function parseDocumentTitle(value) {
+    const empty = { title: "", company: "" };
+
+    let text = cleanInline(value);
+    if (!text) return empty;
+
+    text = text.replace(/^\(\d+\)\s*/, "").trim();
+    text = text.replace(/\s*[|\-\u2013\u2014]\s*LinkedIn\s*$/i, "").trim();
+    if (!text || /^(linkedin|jobs|linkedin jobs)$/i.test(text)) return empty;
+
+    const segments = text.split(/\s*\|\s*/).map(cleanInline).filter(Boolean);
+    if (segments.length === 0) return empty;
+
+    const title = /^linkedin$/i.test(segments[0]) ? "" : segments[0];
+    const company = segments.length > 1 && !/^linkedin$/i.test(segments[1])
+      ? segments[1]
+      : "";
+
+    return { title, company };
+  }
+
+  function titleFromH1(doc) {
+    const root = documentRoot(doc);
+    if (!root) return "";
+
+    let title = "";
+    eachElement(root, (element) => {
+      if (tagNameOf(element) !== "H1") return false;
+
+      const text = cleanInline(readElementText(element));
+      if (!text || /^linkedin$/i.test(text)) return false;
+
+      title = text;
+      return true;
+    });
+    return title;
+  }
+
+  /** First link to /company/ with text, in document order. */
+  function companyFromPage(doc) {
+    const root = documentRoot(doc);
+    if (!root) return "";
+
+    let company = "";
+    eachElement(root, (element) => {
+      if (tagNameOf(element) !== "A") return false;
+
+      const href = readAttribute(element, "href");
+      if (!href || !href.includes("/company/")) return false;
+
+      const text = cleanInline(readElementText(element));
+      if (!text) return false;
+
+      company = text;
+      return true;
+    });
+    return company;
+  }
+
+  function stripHeadingText(text, heading) {
+    const cleaned = cleanBlock(text);
+    const headingText = cleanBlock(heading);
+    if (!headingText) return cleaned;
+
+    if (cleaned.startsWith(headingText)) {
+      return cleaned.slice(headingText.length).trim();
+    }
+
+    const index = cleaned.indexOf(headingText);
+    if (index >= 0) {
+      return `${cleaned.slice(0, index)}${
+        cleaned.slice(index + headingText.length)
+      }`.trim();
+    }
+
+    return cleaned;
+  }
+
+  function startsWithHeading(text, headingText) {
+    const heading = cleanBlock(headingText);
+    if (!heading) return false;
+    return cleanBlock(text).startsWith(heading);
+  }
+
+  function descriptionFromHeading(heading) {
+    const headingText = readElementText(heading);
+    const referenceLength = headingText.trim().length;
+
+    let node = heading.parentElement || null;
+    for (
+      let step = 1;
+      node && step <= MAX_HEADING_ANCESTOR_STEPS;
+      step += 1
+    ) {
+      let text = readElementText(node);
+      // The container must begin with the heading; otherwise we have walked
+      // past the description into a toolbar or a page-sized wrapper.
+      if (
+        text.length > referenceLength + MIN_DESCRIPTION_GROWTH &&
+        startsWithHeading(text, headingText)
+      ) {
+        if (text.length > MAX_CONTAINER_SCAN_LENGTH) {
+          text = text.slice(0, MAX_DESCRIPTION_LENGTH);
+        }
+        const description = stripHeadingText(text, headingText);
+        if (description) return truncateDescription(description);
+      }
+      node = node.parentElement || null;
+    }
+
+    return "";
+  }
+
+  /**
+   * Description by heading anchor: find a leaf element whose text is a known
+   * "About the job"-style heading, then walk up to the nearest ancestor that is
+   * clearly longer than the heading itself. That ancestor is the description.
+   */
+  function descriptionByHeading(doc) {
+    const root = documentRoot(doc);
+    if (!root) return "";
+
+    const headings = [];
+    eachElement(root, (element) => {
+      if (elementChildren(element).length > 0) return false;
+      if (!isDescriptionHeading(readElementText(element))) return false;
+
+      headings.push(element);
+      return false;
+    });
+
+    for (const heading of headings) {
+      const description = descriptionFromHeading(heading);
+      if (description) return description;
+    }
+
+    return "";
+  }
+
+  /**
+   * Extract from the rendered page. JSON-LD is preferred; otherwise the job
+   * detail pane is found by anchoring on the "About the job"-style heading.
+   * Class-based selectors are only the last resort.
    */
   function extractJobFromDocument(doc, url) {
     const externalId = extractJobId(url);
@@ -462,18 +820,21 @@
       postedAt = posting.datePosted;
     }
 
+    const parsedTitle = parseDocumentTitle(documentTitle(doc));
+
+    if (!title) title = titleFromH1(doc);
+    if (!title) title = parsedTitle.title;
+    if (!company) company = parsedTitle.company;
+    if (!company) company = companyFromPage(doc);
+
     if (!title) {
       title = cleanInline(pickText(doc, JOB_DETAIL_SELECTORS.title));
-    }
-    if (!title) {
-      title = titleFromDocumentTitle(documentTitle(doc));
     }
     if (!company) {
       company = cleanInline(pickText(doc, JOB_DETAIL_SELECTORS.company));
     }
-    if (!location) {
-      location = cleanInline(pickText(doc, JOB_DETAIL_SELECTORS.location)) ||
-        null;
+    if (!description) {
+      description = descriptionByHeading(doc);
     }
     if (!description) {
       description = truncateDescription(
@@ -491,13 +852,16 @@
   }
 
   const api = Object.freeze({
+    JOB_DESCRIPTION_HEADINGS,
     JOB_DETAIL_SELECTORS,
     MAX_DESCRIPTION_LENGTH,
+    isDescriptionHeading,
     extractJobId,
     canonicalJobUrl,
     htmlToText,
     parseJsonLdJobPosting,
     extractJobFromJsonLdText,
+    parseDocumentTitle,
     extractJobFromDocument,
   });
 
