@@ -57,9 +57,12 @@ export function rankRequest(
         ].join("\n"),
       },
     ],
-    // A reasoning model spends tokens thinking before it answers; too small a
-    // budget is used up on that and the answer comes back empty.
-    max_tokens: 512,
+    // A reasoning model spends tokens thinking before it answers, and ranking
+    // needs more of that than the mail classifier: 512 was still all spent on
+    // thinking for a real posting, which came back with an empty answer. The
+    // answer itself is two short lines, so the extra budget costs nothing on
+    // the calls where the model answers quickly.
+    max_tokens: 2048,
     temperature: 0,
   };
 }
