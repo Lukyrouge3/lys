@@ -36,6 +36,10 @@ const FACTS: FactBank = {
 const TEMPLATES = { cv: "BASE CV", cover: "BASE COVER" };
 const GOOD_CV = "CV of Torrenté Florian";
 const GOOD_COVER = "Dear hiring team, Torrenté Florian";
+// pdftotext separates pages with a form feed; the second page is the Toreagle
+// case: a single hobby line spilled over while page 1 was already full.
+const SPILLED = "Interests Sailing (sailing and motorboat licences)";
+const OVERFLOW_CV = `CV of Torrenté Florian PAGES2\n\f${SPILLED}`;
 
 function writeAnswer(
   cv: string = GOOD_CV,
@@ -145,9 +149,37 @@ Deno.test("a compile error triggers a repair round", async () => {
   assertStringIncludes(repair, "does not compile");
 });
 
-Deno.test("a page overflow twice ends in review with the gap", async () => {
-  const overflowing = writeAnswer("CV PAGES2 Torrenté Florian");
-  const { deps, calls } = makeDeps([overflowing, overflowing, overflowing]);
+Deno.test("an overflowing first compile quotes the spilled text in the repair prompt", async () => {
+  const { deps, calls } = makeDeps(
+    [writeAnswer(OVERFLOW_CV), writeAnswer()],
+    ["verdict: ok"],
+  );
+
+  const result = await prepareApplication(JOB, deps);
+
+  assertEquals(result.status, "ready");
+  assertEquals(calls.map((call) => call.trigger), [
+    "prep:write",
+    "prep:write",
+    "prep:verify",
+  ]);
+  const repair = calls[1].request.messages.map((m) => m.content).join("\n");
+  assertStringIncludes(repair, "These lines did not fit on page 1:");
+  assertStringIncludes(repair, SPILLED);
+  assertStringIncludes(repair, "Cut at least this much from ANYWHERE else");
+  assertStringIncludes(repair, "Do not shrink type below 10pt.");
+  // The first repair is not escalated yet.
+  assertEquals(repair.includes("remove one whole project"), false);
+});
+
+Deno.test("three failing repair rounds end in review with the spilled text in gaps", async () => {
+  const overflowing = writeAnswer(OVERFLOW_CV);
+  const { deps, calls } = makeDeps([
+    overflowing,
+    overflowing,
+    overflowing,
+    overflowing,
+  ]);
 
   const result = await prepareApplication(JOB, deps);
 
@@ -155,12 +187,59 @@ Deno.test("a page overflow twice ends in review with the gap", async () => {
   const gaps = result.gaps.join("\n");
   assertStringIncludes(gaps, "page count 2");
   assertStringIncludes(gaps, "cut content, do not shrink type below 10pt");
+  assertStringIncludes(gaps, "These lines did not fit on page 1:");
+  assertStringIncludes(gaps, SPILLED);
   assertEquals(calls.map((call) => call.trigger), [
+    "prep:write",
     "prep:write",
     "prep:write",
     "prep:write",
   ]);
   assert(result.cvPdf.length > 0, "the last compiled PDF is kept");
+});
+
+Deno.test("from the second repair on the prompt asks for a whole project and bullet", async () => {
+  const overflowing = writeAnswer(OVERFLOW_CV);
+  const { deps, calls } = makeDeps([
+    overflowing,
+    overflowing,
+    overflowing,
+    overflowing,
+  ]);
+
+  await prepareApplication(JOB, deps);
+
+  const prompt = (index: number) =>
+    calls[index].request.messages.map((message) => message.content).join("\n");
+  assertEquals(prompt(1).includes("remove one whole project"), false);
+  assertStringIncludes(
+    prompt(2),
+    "remove one whole project and one experience",
+  );
+  assertStringIncludes(
+    prompt(3),
+    "remove one whole project and one experience",
+  );
+});
+
+Deno.test("PREP_REPAIRS caps the repair rounds", async () => {
+  const previous = Deno.env.get("PREP_REPAIRS");
+  Deno.env.set("PREP_REPAIRS", "1");
+  try {
+    const overflowing = writeAnswer(OVERFLOW_CV);
+    const { deps, calls } = makeDeps([overflowing, overflowing]);
+
+    const result = await prepareApplication(JOB, deps);
+
+    assertEquals(result.status, "review");
+    assertEquals(calls.map((call) => call.trigger), [
+      "prep:write",
+      "prep:write",
+    ]);
+  } finally {
+    if (previous === undefined) Deno.env.delete("PREP_REPAIRS");
+    else Deno.env.set("PREP_REPAIRS", previous);
+  }
 });
 
 Deno.test("the verifier lists unsupported claims and the run goes to review", async () => {

@@ -19,8 +19,15 @@ import { logger } from "@/utils/logger.ts";
 import { withTimeout } from "@/utils/timeout.ts";
 
 const DEFAULT_TIMEOUT_MS = 600_000;
-const MAX_REPAIR_ROUNDS = 2;
+/**
+ * How many repair calls one preparation may make. Two was not enough on the
+ * Toreagle job: the writer kept the same length because it cannot see its own
+ * PDF, so the second round needs to demand a real cut (see `escalation`).
+ */
+const DEFAULT_REPAIR_ROUNDS = 3;
 const MAX_ERROR_CHARS = 1500;
+/** How much of the spilled text the repair prompt quotes. */
+const MAX_SPILL_CHARS = 600;
 
 const UNPARSABLE_REMINDER =
   "Your previous answer could not be parsed. Follow the required format exactly: " +
@@ -118,13 +125,14 @@ async function run(job: PrepJobInput, deps: PrepDeps): Promise<PrepResult> {
   let cvPdf = checked.cvPdf ?? new Uint8Array();
   let coverPdf = checked.coverPdf ?? new Uint8Array();
   let problems = checked.problems;
+  const rounds = repairRounds();
 
-  for (
-    let round = 0;
-    round < MAX_REPAIR_ROUNDS && problems.length > 0;
-    round++
-  ) {
-    const repaired = await askWrite(job, facts, templates, deps, problems);
+  for (let round = 0; round < rounds && problems.length > 0; round++) {
+    // From the second repair on, ask for a cut big enough to change the page
+    // count instead of another cosmetic trim; keep `problems` itself clean so
+    // the gaps reported to the owner stay the checks, not the instructions.
+    const request = round === 0 ? problems : [...problems, escalation(round)];
+    const repaired = await askWrite(job, facts, templates, deps, request);
     if (!repaired) {
       problems = [
         UNPARSABLE_REMINDER,
@@ -259,17 +267,9 @@ async function checkDocument(
     );
   }
 
-  try {
-    const pages = await deps.pageCount(compiled.pdf);
-    if (pages !== 1) {
-      problems.push(
-        `${label}: page count ${pages}, cut content, do not shrink type below 10pt`,
-      );
-    }
-  } catch (error) {
-    problems.push(`${label}: page count failed: ${errorText(error)}`);
-  }
-
+  // Read the text first: when the document overflows, the repair prompt has to
+  // quote what spilled onto the extra pages, and this is the only view of the
+  // compiled document the writer ever gets.
   let text = "";
   try {
     text = await deps.text(compiled.pdf);
@@ -284,7 +284,63 @@ async function checkDocument(
     problems.push(`${label}: text extraction failed: ${errorText(error)}`);
   }
 
+  try {
+    const pages = await deps.pageCount(compiled.pdf);
+    if (pages !== 1) {
+      problems.push(overflowProblem(label, pages, spilledText(text)));
+    }
+  } catch (error) {
+    problems.push(`${label}: page count failed: ${errorText(error)}`);
+  }
+
   return { pdf: compiled.pdf, text, problems };
+}
+
+/**
+ * The page overflow problem. The old wording is kept as the opening so the
+ * REVIEW block in notes.md still reads the same, then the text that spilled
+ * onto pages 2+ is quoted: without it the writer cannot tell 50 characters
+ * short from 500 and has no reason to cut anything.
+ */
+function overflowProblem(
+  label: "cv" | "cover",
+  pages: number,
+  spill: string,
+): string {
+  const head =
+    `${label}: page count ${pages}, cut content, do not shrink type below 10pt.`;
+  if (!spill) return head;
+  return `${head} These lines did not fit on page 1: ${spill} Cut at least ` +
+    `this much from ANYWHERE else (drop the least relevant bullet or project, ` +
+    `shorten bullets) — do not just delete these lines if they are important ` +
+    `(e.g. keep the hobby line if it is the strongest personality fit and cut ` +
+    `a weaker bullet instead). Do not shrink type below 10pt.`;
+}
+
+/**
+ * The text of pages 2+, as pdftotext separates pages with a form feed. Trimmed
+ * per page, joined, and capped: the prompt only needs enough to show the writer
+ * what did not fit, not the whole document again.
+ */
+function spilledText(text: string): string {
+  const spill = text
+    .split("\f")
+    .slice(1)
+    .map((page) => page.trim())
+    .filter((page) => page.length > 0)
+    .join("\n")
+    .trim();
+  return spill.length > MAX_SPILL_CHARS
+    ? `${spill.slice(0, MAX_SPILL_CHARS)}…`
+    : spill;
+}
+
+/** A later repair round has to cut deeper than the previous one did. */
+function escalation(round: number): string {
+  return `Repair ${round + 1} of the previous attempt's problems: the last ` +
+    `answer still failed and trimming a few words was not enough. Be more ` +
+    `aggressive this time: remove one whole project and one experience bullet, ` +
+    `shorten the remaining bullets, and do not put back what you removed.`;
 }
 
 /**
@@ -314,6 +370,14 @@ export function familyNameOf(facts: FactBank): string | null {
   }
 
   return null;
+}
+
+function repairRounds(): number {
+  const raw = Deno.env.get("PREP_REPAIRS")?.trim();
+  const value = raw ? Number(raw) : NaN;
+  return Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : DEFAULT_REPAIR_ROUNDS;
 }
 
 function timeoutMs(): number {
