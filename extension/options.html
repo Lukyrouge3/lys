@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Send to Lys — Options</title>
+    <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f8fa;
+      --panel: #ffffff;
+      --text: #1f2328;
+      --muted: #59636e;
+      --border: #d0d7de;
+      --accent: #0a66c2;
+      --ok: #1a7f37;
+      --error: #cf222e;
+      --warn: #9a6700;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --border: #30363d;
+        --accent: #2f81f7;
+        --ok: #3fb950;
+        --error: #f85149;
+        --warn: #d29922;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Arial, sans-serif;
+    }
+
+    main {
+      max-width: 480px;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      background: var(--panel);
+      box-shadow: 0 8px 28px rgb(0 0 0 / 8%);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+    }
+
+    .hint {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+
+    label {
+      display: block;
+      margin: 0 0 16px;
+      font-weight: 600;
+    }
+
+    input {
+      display: block;
+      width: 100%;
+      margin-top: 6px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+      outline: 3px solid color-mix(in srgb, var(--accent) 25%, transparent);
+      outline-offset: 1px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 9px 16px;
+      background: var(--accent);
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      border-color: var(--border);
+      background: transparent;
+      color: var(--text);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    #status {
+      min-height: 1.5em;
+      margin: 18px 0 0;
+      font-weight: 600;
+    }
+
+    #status[data-kind="ok"] {
+      color: var(--ok);
+    }
+
+    #status[data-kind="error"] {
+      color: var(--error);
+    }
+
+    #status[data-kind="warn"] {
+      color: var(--warn);
+    }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Send to Lys</h1>
+      <p class="hint">
+        LinkedIn job pages get a “Send to Lys” button. It sends only the job you
+        explicitly choose to your local Lys bot.
+      </p>
+
+      <form id="settings" novalidate>
+        <label>
+          Endpoint
+          <input
+            id="endpoint"
+            name="endpoint"
+            type="url"
+            placeholder="http://127.0.0.1:8787"
+            autocomplete="off"
+            spellcheck="false"
+          >
+        </label>
+
+        <label>
+          Token
+          <input
+            id="token"
+            name="token"
+            type="password"
+            autocomplete="new-password"
+            spellcheck="false"
+          >
+        </label>
+
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button type="button" id="test" class="secondary">
+            Test connection
+          </button>
+        </div>
+      </form>
+
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
