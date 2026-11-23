@@ -69,6 +69,8 @@ services:
       PREP_AGENT: "prep"
       # The job ranker also uses the stronger agent: one call per click, and judging fit needs it.
       JOB_RANKER_AGENT: "prep"
+      # A runaway guard, not a budget: spreading prep over days costs the same, so this only stops a loop or a click-spree. Set 0 for no cap.
+      PREP_DAILY_CAP: "50"
     restart: unless-stopped
     depends_on:
       postgres:

@@ -1,11 +1,17 @@
-// Wires the daily messages into the running bot: the morning summary and the
-// mail sorting proposal. Quiet hours do not apply to the morning message: it is
-// what quiet hours end for.
+// Wires the daily jobs into the running bot: the morning summary, the mail
+// sorting proposal, and the nightly prep catch-up. Quiet hours do not apply to
+// the morning message: it is what quiet hours end for.
 import type { Client } from "discord.js";
 import { dmOwner } from "@/chat/discord/notify.ts";
 import { logger } from "@/utils/logger.ts";
 import { startDaily } from "@/scheduler/clock.ts";
 import { buildMorningMessage, MORNING_JOB } from "@/scheduler/morning.ts";
+import {
+  PREP_CATCHUP_JOB,
+  prepCatchupEnabled,
+  prepCatchupTime,
+  runPrepCatchup,
+} from "@/scheduler/prepCatchup.ts";
 import {
   runSortProposal,
   SORT_JOB,
@@ -27,8 +33,9 @@ export function ownerTimezone(): string {
 }
 
 /**
- * Starts the daily morning DM and, unless `MAIL_SORT=0`, the daily sorting
- * proposal. The returned function stops both.
+ * Starts the daily morning DM, unless `MAIL_SORT=0` the daily sorting
+ * proposal, and unless `PREP_ENABLED=0` the nightly prep catch-up. The returned
+ * function stops all of them.
  */
 export function startScheduler(client: Client): () => void {
   const stops: Array<() => void> = [];
@@ -62,6 +69,19 @@ export function startScheduler(client: Client): () => void {
     );
   } else {
     logger.info("scheduler: mail sorting proposal disabled (MAIL_SORT=0)");
+  }
+
+  if (prepCatchupEnabled()) {
+    stops.push(
+      startDaily({
+        name: PREP_CATCHUP_JOB,
+        at: prepCatchupTime(),
+        tz: ownerTimezone(),
+        run: () => runPrepCatchup(),
+      }).stop,
+    );
+  } else {
+    logger.info("scheduler: prep catch-up disabled (PREP_ENABLED=0)");
   }
 
   return () => {

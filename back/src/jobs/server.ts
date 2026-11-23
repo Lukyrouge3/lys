@@ -6,10 +6,10 @@ import type { Job } from "@/generated/prisma/client.ts";
 import { processJob } from "@/jobs/process.ts";
 import {
   interruptedPrepJobs,
-  prepareJob,
   recoverInterruptedPrep,
   shouldPrepare,
 } from "@/jobs/prep.ts";
+import { enqueuePrep, prepPending } from "@/jobs/queues.ts";
 import { loadJobsToken } from "@/jobs/token.ts";
 import type { JobInput } from "@/jobs/store.ts";
 import { saveJob } from "@/jobs/store.ts";
@@ -343,19 +343,15 @@ export async function startJobServer(
   }
 
   // Prep is slow (minutes) and must never hold ranking behind it, so it has
-  // its own serial queue.
-  const prepQueue = serialQueue(async (jobId) => {
-    await prepareJob(jobId);
-  });
-
+  // its own serial queue, shared with the nightly catch-up.
   const rankQueue = serialQueue(async (jobId) => {
     const job = await processJob(jobId);
     if (job && shouldPrepare(job)) {
-      const depth = prepQueue.enqueue(job.id);
+      void enqueuePrep(job.id);
       logger.debug(
         `jobs: prep queued ${
           shortJobId(job.id)
-        } (rank queue ${rankQueue.depth()}, prep queue ${depth}) ${job.url}`,
+        } (rank queue ${rankQueue.depth()}, prep queue ${prepPending()}) ${job.url}`,
       );
     }
   });
@@ -364,11 +360,11 @@ export async function startJobServer(
   const recovered = await recoverInterruptedPrep();
   if (recovered > 0) {
     for (const job of await interruptedPrepJobs()) {
-      const depth = prepQueue.enqueue(job.id);
+      void enqueuePrep(job.id);
       logger.debug(
         `jobs: prep re-queued ${
           shortJobId(job.id)
-        } after a restart (prep queue ${depth}) ${job.url}`,
+        } after a restart (prep queue ${prepPending()}) ${job.url}`,
       );
     }
   }
@@ -381,7 +377,7 @@ export async function startJobServer(
         logger.info(`jobs: listening on http://${hostname}:${port}`);
         logger.info(`jobs: inbox folder ${JOB_INBOX_FOLDER}`);
         logger.info(
-          `jobs: queues -> rank ${rankQueue.depth()}, prep ${prepQueue.depth()}`,
+          `jobs: queues -> rank ${rankQueue.depth()}, prep ${prepPending()}`,
         );
       },
     }, (req) =>

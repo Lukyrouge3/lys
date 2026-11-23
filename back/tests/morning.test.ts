@@ -173,6 +173,33 @@ Deno.test("the closing hint only appears when something waits", () => {
   assertStringIncludes(message, '"I applied to 1f2e3d4c"');
 });
 
+Deno.test("a full prep cap is one short clause with the waiting jobs", () => {
+  const sections = morningSections({
+    since: YESTERDAY_MORNING,
+    clicked: [],
+    waiting: [waiting({ status: "queued", rank: "maybe" })],
+    importantMail: [],
+    otherMail: { normal: 0, noise: 0 },
+    prepCapReached: true,
+  });
+  const message = renderMorning(sections);
+
+  assertStringIncludes(message, "waiting to be prepared");
+  assertStringIncludes(message, "daily cap");
+  assertStringIncludes(message, "nightly catch-up");
+
+  const quiet = renderMorning(
+    morningSections({
+      since: YESTERDAY_MORNING,
+      clicked: [],
+      waiting: [waiting({ status: "queued" })],
+      importantMail: [],
+      otherMail: { normal: 0, noise: 0 },
+    }),
+  );
+  assertEquals(quiet.includes("daily cap"), false);
+});
+
 Deno.test("a long morning shortens items before dropping them", () => {
   const many = Array.from({ length: 40 }, (_, index) =>
     clicked({
@@ -325,7 +352,7 @@ Deno.test({
       prepFolder: "Postulations/Old",
       preparedAt: new Date("2026-11-21T18:00:00Z"),
     });
-    await addJob({
+    const maybeWaitingJob = await addJob({
       title: "Maybe Not Apply",
       rank: "maybe",
       status: "queued",
@@ -403,7 +430,7 @@ Deno.test({
     });
 
     await t.step("waiting jobs carry the short id", () => {
-      assertStringIncludes(message, "🕒 Waiting for you (4)");
+      assertStringIncludes(message, "🕒 Waiting for you (6)");
       assertStringIncludes(message, `· ready · ${readyJob.id.slice(0, 8)}`);
       assertStringIncludes(message, "Prepared in Postulations/Globex");
       assertStringIncludes(message, "Needs your look: CV missing dates");
@@ -411,8 +438,13 @@ Deno.test({
         message,
         `waiting to be prepared · ${waitingJob.id.slice(0, 8)}`,
       );
+      // A queued maybe is worth preparing too, so it waits here as well.
+      assertStringIncludes(message, "Maybe Not Apply");
+      assertStringIncludes(
+        message,
+        `waiting to be prepared · ${maybeWaitingJob.id.slice(0, 8)}`,
+      );
       assertEquals(message.includes("Already Prepared But Queued"), false);
-      assertEquals(message.includes("Maybe Not Apply"), false);
       assertStringIncludes(message, "mark_job");
     });
 

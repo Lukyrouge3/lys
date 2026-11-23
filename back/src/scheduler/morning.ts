@@ -4,6 +4,7 @@
 // `buildMorningMessage` only adds the reads.
 import prisma from "@/db.ts";
 import type { Job, JobRank, MailNote } from "@/generated/prisma/client.ts";
+import { prepCapReached, prepRanks } from "@/jobs/prep.ts";
 import { shortId } from "@/jobs/store.ts";
 import { senderName } from "@/chat/discord/notify.ts";
 
@@ -39,6 +40,8 @@ export type MorningData = {
   otherMail: { normal: number; noise: number };
   /** Optional: the line only appears when a proposal is pending. */
   sortProposal?: PendingProposal | null;
+  /** Optional: true when today's prep cap is used up. */
+  prepCapReached?: boolean;
 };
 
 export type Item = { full: string; short: string };
@@ -196,6 +199,18 @@ export function morningSections(data: MorningData): Section[] {
     : null;
   const waitingItems = pending ? [...waiting, pending] : waiting;
   const mail = formatImportantMail(data.importantMail);
+  const waitingHint = waiting.length === 0
+    ? undefined
+    : `When something moves, say \`mark_job\` — e.g. "I applied to ${
+      shortId(sortWaiting(data.waiting)[0])
+    }".`;
+  // Short clause only: the cap is a normal night, not a problem to explain.
+  const capHint = waiting.length > 0 && data.prepCapReached
+    ? "Prep is at its daily cap; the nightly catch-up picks up the rest."
+    : undefined;
+  const waitingFooter = waitingHint
+    ? [waitingHint, capHint].filter(Boolean).join(" ")
+    : capHint;
 
   return [
     {
@@ -213,10 +228,7 @@ export function morningSections(data: MorningData): Section[] {
         : `🕒 Waiting for you (${waitingItems.length})`,
       items: waitingItems,
       empty: "Nothing waiting; the queue is clear.",
-      footer: waiting.length === 0
-        ? undefined
-        : 'When something moves, say `mark_job` — e.g. "I applied to ' +
-          `${shortId(sortWaiting(data.waiting)[0])}".`,
+      footer: waitingFooter,
     },
     {
       heading: mail.length === 0
@@ -296,8 +308,8 @@ export async function loadMorningData(
   const since = summaryWindow(now, run?.lastRunAt ?? null);
   const window = { gte: since, lte: now };
 
-  const [clicked, waiting, importantMail, other, sortProposal] = await Promise
-    .all([
+  const [clicked, waiting, importantMail, other, sortProposal, capReached] =
+    await Promise.all([
       prisma.job.findMany({
         where: { createdAt: window },
         orderBy: { createdAt: "desc" },
@@ -308,7 +320,7 @@ export async function loadMorningData(
             { status: { in: ["ready", "review"] } },
             {
               status: "queued",
-              rank: "apply",
+              rank: { in: prepRanks() },
               preparedAt: null,
               prepFolder: null,
             },
@@ -329,6 +341,7 @@ export async function loadMorningData(
         orderBy: { createdAt: "desc" },
         select: { summary: true },
       }),
+      prepCapReached(now.getTime()),
     ]);
 
   const countOf = (importance: string) =>
@@ -341,6 +354,7 @@ export async function loadMorningData(
     importantMail,
     otherMail: { normal: countOf("normal"), noise: countOf("noise") },
     sortProposal,
+    prepCapReached: capReached,
   };
 }
 
