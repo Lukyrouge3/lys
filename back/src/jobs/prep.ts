@@ -7,6 +7,8 @@ import prisma from "@/db.ts";
 import { writeJobToInbox } from "@/jobs/inbox.ts";
 import { shortJobId } from "@/jobs/log.ts";
 import { resolveJobRef } from "@/jobs/store.ts";
+import { bundleApplication } from "@/prep/bundle.ts";
+import type { BundleResult } from "@/prep/bundle.ts";
 import { deliverApplication } from "@/prep/deliver.ts";
 import type { DeliveryDav } from "@/prep/deliver.ts";
 import { prepareApplication } from "@/prep/prepare.ts";
@@ -43,6 +45,10 @@ export type PrepOutcome = {
   job: Job;
   folder?: string;
   reason?: string;
+  /** The merged application.pdf, when bundling succeeded. */
+  bundle?: BundleResult;
+  /** Why bundling failed; the delivery itself still stands. */
+  bundleWarning?: string;
 };
 
 export type PreparableJob = Pick<
@@ -54,6 +60,7 @@ export type PrepDeps = {
   /** The long-running workflow; the real one talks to the model and Typst. */
   prepare: (job: Job) => Promise<PrepResult>;
   deliver: typeof deliverApplication;
+  bundle: typeof bundleApplication;
   tracker: typeof upsertTrackerRow;
   writeInbox: typeof writeJobToInbox;
   /** Injectable clock, in milliseconds since the epoch. */
@@ -183,6 +190,7 @@ export async function prepareJob(
 ): Promise<PrepOutcome> {
   const prepare = deps.prepare ?? ((job: Job) => prepareApplication(job));
   const deliver = deps.deliver ?? deliverApplication;
+  const bundle = deps.bundle ?? bundleApplication;
   const tracker = deps.tracker ?? upsertTrackerRow;
   const writeInbox = deps.writeInbox ?? writeJobToInbox;
   const now = deps.now ?? (() => Date.now());
@@ -226,6 +234,19 @@ export async function prepareJob(
       { dav: deps.dav, now: new Date(now()) },
     );
 
+    // application.pdf is a convenience copy; a bundling failure is reported,
+    // never allowed to undo or fail the delivery that already happened.
+    let bundleResult: BundleResult | undefined;
+    let bundleWarning: string | undefined;
+    try {
+      bundleResult = await bundle(folder, { dav: deps.dav });
+    } catch (err) {
+      bundleWarning = errorText(err);
+      logger.warn(
+        `jobs: bundle failed for ${folder}: ${bundleWarning} ${preparing.url}`,
+      );
+    }
+
     const entry = trackerEntry(preparing, result, folder, now());
     try {
       await tracker(entry, { dav: deps.dav });
@@ -253,7 +274,13 @@ export async function prepareJob(
         Math.round(now() - started)
       } ms, folder ${folder} ${preparing.url}`,
     );
-    return { prepared: true, job: updated, folder };
+    return {
+      prepared: true,
+      job: updated,
+      folder,
+      bundle: bundleResult,
+      bundleWarning,
+    };
   } catch (err) {
     const note = errorText(err);
     let failed: Job;

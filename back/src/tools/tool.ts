@@ -15,6 +15,7 @@ import { DeleteFileTool } from "@/tools/files/deleteFile.ts";
 import { ListJobsTool } from "@/tools/jobs/listJobs.ts";
 import { MarkJobTool } from "@/tools/jobs/markJob.ts";
 import { PrepareJobTool } from "@/tools/jobs/prepareJob.ts";
+import { BundleApplicationTool } from "@/tools/jobs/bundleApplication.ts";
 import { MorningSummaryTool } from "@/tools/jobs/morningSummary.ts";
 import { EmitEvent } from "@/agent/events.ts";
 import { ApprovalStatus } from "@/generated/prisma/enums.ts";
@@ -39,6 +40,7 @@ export const defaultTools: ToolRegistry = new Map<string, Tool>(
     new ListJobsTool(),
     new MarkJobTool(),
     new PrepareJobTool(),
+    new BundleApplicationTool(),
     new MorningSummaryTool(),
   ].map((
     tool,

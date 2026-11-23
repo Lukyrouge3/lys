@@ -11,6 +11,8 @@ import {
 } from "@/jobs/prep.ts";
 import { saveJob, setRank } from "@/jobs/store.ts";
 import type { deliverApplication } from "@/prep/deliver.ts";
+import type { bundleApplication } from "@/prep/bundle.ts";
+import type { BundleResult } from "@/prep/bundle.ts";
 import type { PrepResult } from "@/prep/types.ts";
 import type { TrackerEntry, upsertTrackerRow } from "@/prep/tracker.ts";
 import type { writeJobToInbox } from "@/jobs/inbox.ts";
@@ -100,6 +102,7 @@ function result(overrides: Partial<PrepResult> = {}): PrepResult {
 type Harness = {
   prepareCalls: Job[];
   deliveries: string[];
+  bundles: string[];
   trackerEntries: TrackerEntry[];
   bridge: Job[];
   deps: Parameters<typeof prepareJob>[1];
@@ -111,6 +114,7 @@ function harness(
     prepareError?: Error;
     hang?: boolean;
     trackerError?: Error;
+    bundleError?: Error;
     timeoutMs?: number;
     force?: boolean;
     now?: () => number;
@@ -118,6 +122,7 @@ function harness(
 ): Harness {
   const prepareCalls: Job[] = [];
   const deliveries: string[] = [];
+  const bundles: string[] = [];
   const trackerEntries: TrackerEntry[] = [];
   const bridge: Job[] = [];
 
@@ -132,6 +137,19 @@ function harness(
     deliveries.push(job.id);
     return Promise.resolve({ folder: "Postulations/acme/2026-11-10" });
   }) as unknown as typeof deliverApplication;
+
+  const bundle = ((folder: string) => {
+    bundles.push(folder);
+    if (options.bundleError) return Promise.reject(options.bundleError);
+    return Promise.resolve(
+      {
+        path: `${folder}/application.pdf`,
+        parts: ["cv-en.pdf", "cover-en.pdf"],
+        skipped: [],
+        pages: 2,
+      } satisfies BundleResult,
+    );
+  }) as unknown as typeof bundleApplication;
 
   const tracker = ((entry: TrackerEntry) => {
     trackerEntries.push(entry);
@@ -151,11 +169,13 @@ function harness(
   return {
     prepareCalls,
     deliveries,
+    bundles,
     trackerEntries,
     bridge,
     deps: {
       prepare,
       deliver,
+      bundle,
       tracker,
       writeInbox,
       timeoutMs: options.timeoutMs ?? 5_000,
@@ -390,6 +410,40 @@ Deno.test({
 
         assertEquals(outcome.prepared, true);
         assertEquals((await fresh(job.id)).status, "ready");
+      });
+
+      await t.step(
+        "a bundle failure never undoes the delivery",
+        async () => {
+          useEnv();
+          await truncate("Job");
+          const job = await addJob({ rank: "apply" });
+
+          const h = harness({ bundleError: new Error("pdfunite is missing") });
+          const outcome = await prepareJob(job.id, h.deps);
+
+          assertEquals(outcome.prepared, true);
+          assertEquals(h.bundles, ["Postulations/acme/2026-11-10"]);
+          assertStringIncludes(outcome.bundleWarning ?? "", "pdfunite");
+          assertEquals((await fresh(job.id)).status, "ready");
+          assertEquals(h.trackerEntries.length, 1);
+        },
+      );
+
+      await t.step("review jobs are bundled too", async () => {
+        useEnv();
+        await truncate("Job");
+        const job = await addJob({ rank: "maybe" });
+
+        const h = harness({
+          prepared: result({ status: "review", gaps: ["one gap"] }),
+        });
+        const outcome = await prepareJob(job.id, h.deps);
+
+        assertEquals(outcome.prepared, true);
+        assertEquals(h.bundles, ["Postulations/acme/2026-11-10"]);
+        assertEquals(outcome.bundle?.pages, 2);
+        assertEquals((await fresh(job.id)).status, "review");
       });
 
       await t.step(
